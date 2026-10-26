@@ -12,15 +12,14 @@ from .paths import CONFIG_DIR, CONFIG_PATH, log
 
 
 def _migrate_default():
-    """Build a sensible first-run config: a local VLC target (and /tank/media as a
-    source if present). Cast devices and SmartCast TVs are added via the wizard."""
-    cfg = {"sources": [], "targets": []}
-    if os.path.isdir("/tank/media"):
-        cfg["sources"].append({"name": "Media", "path": "/tank/media"})
-    cfg["targets"].append({"type": "vlc", "name": "VLC (this PC)"})
-    cfg["web"] = {"enabled": True, "port": 8950}
-    cfg["auto_next"] = True
-    return cfg
+    """Build a clean first-run config: just a local VLC target. Media sources,
+    Cast devices and SmartCast TVs are all added through the setup wizard."""
+    return {
+        "sources": [],
+        "targets": [{"type": "vlc", "name": "VLC (this PC)"}],
+        "web": {"enabled": True, "port": 8950},
+        "auto_next": True,
+    }
 
 
 def save_config(cfg):
