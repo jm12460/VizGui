@@ -1,6 +1,6 @@
 # vizgui
 
-Cast local media to a Vizio SmartCast TV / Chromecast or to VLC, with a Vizio
+Cast local media to a SmartCast TV / Chromecast or to VLC, with a
 remote, a phone web-remote (QR/PIN paired), HEVC GPU transcoding, SMB sources,
 auto-play-next, and a setup wizard.
 
@@ -14,7 +14,7 @@ runs `vizgui.app:main`).
 ## Module layout
 - `paths.py`      dirs, tool paths, logging
 - `config.py`     load/save/migrate config + shared active-cast state (HOST/TOK/TV_IP/CAST_PORT/CFG)
-- `smartcast.py`  Vizio SmartCast keys, status, pairing
+- `smartcast.py`  SmartCast keys, status, pairing
 - `chromecast.py` go-chromecast wrapper + device scan
 - `vlc.py`        VLC control — HTTP (launched) + MPRIS (manual) backends
 - `transcode.py`  NVENC/x264 detection + live-transcode wrapper

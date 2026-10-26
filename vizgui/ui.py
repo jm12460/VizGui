@@ -1134,7 +1134,7 @@ class SetupDialog(QDialog):
         self.tgt_list = QListWidget(); lay.addWidget(self.tgt_list)
         tb = QHBoxLayout()
         b_scan = QPushButton("Scan for Cast devices"); b_scan.clicked.connect(self._scan)
-        b_pair = QPushButton("Pair Vizio SmartCast…"); b_pair.clicked.connect(self._pair)
+        b_pair = QPushButton("Pair SmartCast…"); b_pair.clicked.connect(self._pair)
         b_vlc = QPushButton("Add local VLC"); b_vlc.clicked.connect(self._add_vlc)
         b_rmt = QPushButton("Remove"); b_rmt.clicked.connect(self._rm_target)
         for b in (b_scan, b_pair, b_vlc, b_rmt):
@@ -1271,7 +1271,7 @@ class SetupDialog(QDialog):
     def _pair(self):
         i = self.tgt_list.currentRow()
         if not (0 <= i < len(self.targets)) or self.targets[i].get("type") != "cast":
-            QMessageBox.information(self, "Pair", "Select a Cast target first (a Vizio SmartCast TV).")
+            QMessageBox.information(self, "Pair", "Select a Cast target first (a SmartCast TV).")
             return
         t = self.targets[i]
         port, ok = QInputDialog.getText(self, "SmartCast port", "SmartCast API port:", text="7345")
@@ -1280,7 +1280,7 @@ class SetupDialog(QDialog):
         try:
             req_token, challenge = sc_pair_start(t["addr"], port)
         except Exception as e:
-            QMessageBox.warning(self, "Pair", "Could not start pairing (is it a Vizio SmartCast TV?):\n" + str(e))
+            QMessageBox.warning(self, "Pair", "Could not start pairing (is it a SmartCast TV?):\n" + str(e))
             return
         code, ok = QInputDialog.getText(self, "Pairing code", "Enter the code shown on the TV:")
         if not (ok and code):

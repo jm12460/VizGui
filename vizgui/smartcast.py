@@ -1,4 +1,4 @@
-"""Vizio SmartCast control (TV remote keys + status) and pairing.
+"""SmartCast control (TV remote keys + status) and pairing.
 
 Uses the active SmartCast target via ``config.HOST`` / ``config.TOK``.
 """
@@ -12,7 +12,7 @@ _SSL = ssl.create_default_context()
 _SSL.check_hostname = False
 _SSL.verify_mode = ssl.CERT_NONE
 
-# SmartCast key codes (codeset, code) - verified against pyvizio DEVICE_CLASS_TV.
+# SmartCast key codes (codeset, code).
 KEYS = {
     "power": (11, 2), "input": (7, 1),
     "volup": (5, 1), "voldown": (5, 0), "mute": (5, 4),

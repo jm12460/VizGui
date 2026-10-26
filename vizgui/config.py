@@ -12,24 +12,11 @@ from .paths import CONFIG_DIR, CONFIG_PATH, log
 
 
 def _migrate_default():
-    """Build a first-run config from whatever this machine already has: the old
-    Vizio pairing (~/.config/vizio/auth.json) becomes a cast target, /tank/media
-    a source, and local VLC is always offered."""
+    """Build a sensible first-run config: a local VLC target (and /tank/media as a
+    source if present). Cast devices and SmartCast TVs are added via the wizard."""
     cfg = {"sources": [], "targets": []}
     if os.path.isdir("/tank/media"):
         cfg["sources"].append({"name": "Media", "path": "/tank/media"})
-    old = os.path.expanduser("~/.config/vizio/auth.json")
-    if os.path.isfile(old):
-        try:
-            with open(old) as f:
-                a = json.load(f)
-            host = a.get("host", "")
-            cfg["targets"].append({
-                "type": "cast", "name": "Basement TV",
-                "addr": host.split(":")[0], "cast_port": "8009",
-                "smartcast_host": host, "auth_token": a.get("auth_token")})
-        except Exception:
-            pass
     cfg["targets"].append({"type": "vlc", "name": "VLC (this PC)"})
     cfg["web"] = {"enabled": True, "port": 8950}
     cfg["auto_next"] = True
@@ -96,7 +83,7 @@ def active_cast(cfg=None):
 # ---- shared mutable state: the currently-active cast target ----
 TV_IP = None           # Cast device IP (go-chromecast)
 CAST_PORT = "8009"
-HOST = None            # Vizio SmartCast host:port (or None)
+HOST = None            # SmartCast host:port (or None)
 TOK = None             # SmartCast pairing token (or None)
 
 
