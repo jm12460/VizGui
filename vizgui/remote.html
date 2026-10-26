@@ -1,0 +1,165 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>viz remote</title>
+<style>
+:root{--bg:#0d0f13;--card:#171a20;--btn:#232832;--btn2:#1b2029;--bd:#2a313c;--txt:#e9ebef;--dim:#8b929e;--ac:#3f7bff;--red:#e5484d}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+body{margin:0;background:var(--bg);color:var(--txt);padding-bottom:72px}
+header{padding:14px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;background:var(--bg);z-index:5}
+header .t{font-weight:800;font-size:17px;flex:1}
+select,button{color:var(--txt);background:var(--btn);border:1px solid var(--bd);border-radius:11px;font-size:15px}
+select{padding:9px 10px}
+.view{display:none;padding:0 16px}
+.view.on{display:block}
+.card{background:var(--card);border:1px solid #242a33;border-radius:16px;padding:16px;margin:0 0 14px}
+.np-title{font-size:16px;font-weight:600;word-break:break-word}
+.badge{display:none;background:var(--red);color:#fff;font-size:11px;font-weight:800;border-radius:6px;padding:3px 8px;margin-left:8px}
+.bar{height:8px;background:#0f1217;border-radius:4px;margin:12px 0 6px;overflow:hidden}
+.bar>i{display:block;height:100%;width:0;background:var(--ac);border-radius:4px}
+.time{color:var(--dim);font-size:13px;text-align:right}
+.row{display:flex;gap:10px;margin-top:12px}
+.row>button{flex:1;padding:16px 8px;font-size:15px}
+button:active{background:#313a48}
+button.ac{background:var(--ac);border-color:#5a8dff;color:#fff;font-weight:700}
+.sect{color:#7f8794;font-weight:800;font-size:12px;margin:4px 2px 10px}
+/* dpad */
+.dpad{position:relative;width:230px;height:230px;margin:6px auto 8px}
+.dpad button{position:absolute;background:var(--btn2);border:1px solid var(--bd)}
+.dpad .ring{width:230px;height:230px;border-radius:50%;left:0;top:0;font-size:0}
+.dpad .ok{width:104px;height:104px;border-radius:50%;left:63px;top:63px;background:var(--ac);border-color:#5a8dff;color:#fff;font-weight:800;font-size:17px}
+.dpad .ar{background:transparent;border:0;color:#c7ccd4;font-size:22px;width:60px;height:60px}
+.dpad .up{left:85px;top:6px}.dpad .dn{left:85px;bottom:6px}.dpad .lf{left:6px;top:85px}.dpad .rt{right:6px;top:85px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.grid button,.pw{padding:15px;font-size:15px}
+.pwrow{display:flex;gap:10px;margin-bottom:12px}
+.pw{flex:1}
+.pw.power{background:var(--red);border-color:#f05b60;color:#fff;max-width:64px;font-size:18px}
+/* browse */
+.crumb{color:var(--dim);font-size:13px;margin:0 2px 10px;word-break:break-all}
+.list button{display:flex;width:100%;align-items:center;gap:10px;text-align:left;padding:14px 12px;margin-bottom:8px;font-size:15px}
+.list .ic{opacity:.7}
+/* tabbar */
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#10131a;border-top:1px solid #242a33}
+nav button{flex:1;border:0;border-radius:0;background:transparent;color:var(--dim);padding:12px 0;font-size:12px;font-weight:700}
+nav button.on{color:var(--ac)}
+nav .ico{display:block;font-size:19px;margin-bottom:2px}
+.msg{color:var(--dim);font-size:13px;padding:8px 2px}
+#login{position:fixed;inset:0;background:var(--bg);z-index:20;display:none;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+#login.on{display:flex}
+#login h2{font-size:20px;margin:0 0 6px}
+#login p{color:var(--dim);margin:0 0 20px;max-width:300px}
+#login input{font-size:28px;letter-spacing:8px;text-align:center;width:200px;padding:12px;border-radius:12px;background:var(--card);border:1px solid var(--bd);color:var(--txt)}
+#login button{margin-top:16px;padding:14px 28px;font-size:16px}
+#pinmsg{color:var(--red);min-height:18px;margin-top:10px;font-size:14px}
+</style></head><body>
+<div id="login"><h2>Pair this phone</h2><p>Scan the QR, or enter the pairing PIN — both are in ⚙ Setup → Phone remote in the viz app.</p>
+ <input id="pinin" type="tel" inputmode="numeric" maxlength="6" placeholder="------">
+ <button class="ac" onclick="pair()">Connect</button><div id="pinmsg"></div></div>
+<header><div class="t">viz remote</div>
+<select id="target" onchange="setTarget(this.value)"></select></header>
+
+<div id="v-play" class="view on">
+ <div class="card">
+  <div style="display:flex;align-items:center"><div class="sect" style="margin:0">NOW PLAYING</div><span id="badge" class="badge">● LIVE</span></div>
+  <div id="np" class="np-title" style="margin-top:8px">Nothing playing.</div>
+  <div class="bar"><i id="prog"></i></div>
+  <div id="time" class="time"></div>
+  <div class="row"><button onclick="tr('prev')">⏮ Prev</button><button class="ac" onclick="tr('playpause')">⏯ Play/Pause</button><button onclick="tr('next')">Next ⏭</button></div>
+  <div class="row"><button onclick="tr('rewind')">⏪ 30s</button><button onclick="tr('stop')">⏹ Stop</button><button onclick="tr('forward')">30s ⏩</button></div>
+  <div class="row"><button id="an" onclick="toggleAN()">Auto-next: …</button></div>
+ </div>
+ <div id="tv" class="msg"></div>
+</div>
+
+<div id="v-remote" class="view">
+ <div class="card">
+  <div class="pwrow"><button class="pw power" onclick="key('power')">⏻</button><button class="pw" onclick="key('input')">Input</button></div>
+  <div class="dpad">
+   <button class="ring" onclick="key('ok')"></button>
+   <button class="ar up" onclick="key('up')">▲</button>
+   <button class="ar dn" onclick="key('down')">▼</button>
+   <button class="ar lf" onclick="key('left')">◀</button>
+   <button class="ar rt" onclick="key('right')">▶</button>
+   <button class="ok" onclick="key('ok')">OK</button>
+  </div>
+  <div class="grid">
+   <button onclick="key('back')">Back</button><button onclick="key('home')">Home</button>
+   <button onclick="key('menu')">Menu</button><button onclick="key('exit')">Exit</button>
+   <button onclick="key('voldown')">Vol −</button><button onclick="key('volup')">Vol +</button>
+   <button onclick="key('mute')">Mute</button><button onclick="key('info')">Info</button>
+  </div>
+ </div>
+</div>
+
+<div id="v-browse" class="view">
+ <div class="card">
+  <select id="source" onchange="browse(this.value,'')" style="width:100%"></select>
+  <div id="crumb" class="crumb"></div>
+  <div id="list" class="list"></div>
+  <div id="bmsg" class="msg"></div>
+ </div>
+</div>
+
+<nav>
+ <button id="t-play" class="on" onclick="tab('play')"><span class="ico">▶</span>Playing</button>
+ <button id="t-remote" onclick="tab('remote')"><span class="ico">⊕</span>Remote</button>
+ <button id="t-browse" onclick="tab('browse')"><span class="ico">≣</span>Browse</button>
+</nav>
+
+<script>
+let curSrc=0, curSub="";
+if(location.hash.indexOf('t=')>=0){try{localStorage.setItem('viztoken',decodeURIComponent(location.hash.split('t=')[1]));history.replaceState(null,'',location.pathname);}catch(e){}}
+let TOKEN=localStorage.getItem('viztoken')||'';
+function showLogin(){document.getElementById('login').classList.add('on');}
+function hideLogin(){document.getElementById('login').classList.remove('on');}
+async function api(p,o){o=o||{};o.headers=Object.assign({'X-Viz-Token':TOKEN},o.headers||{});
+ try{const r=await fetch(p,o);if(r.status===401){showLogin();return{__401:true};}return await r.json();}catch(e){return{};}}
+function cmd(b){return api('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});}
+async function pair(){const pin=document.getElementById('pinin').value;
+ const r=await fetch('/api/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
+ const d=await r.json().catch(_=>({}));
+ if(d.ok){TOKEN=d.token;localStorage.setItem('viztoken',TOKEN);document.getElementById('pinmsg').textContent='';hideLogin();poll();}
+ else document.getElementById('pinmsg').textContent=d.locked?'Too many tries — tap New PIN in the app.':'Wrong PIN.';}
+function key(c){cmd({kind:'key',cmd:c});}
+function tr(a){cmd({kind:'transport',action:a});}
+function setTarget(i){cmd({kind:'target',index:+i});}
+function tab(n){for(const v of ['play','remote','browse']){document.getElementById('v-'+v).classList.toggle('on',v===n);document.getElementById('t-'+v).classList.toggle('on',v===n);}if(n==='browse')loadSources();}
+function fmt(s){s=Math.max(0,s|0);let h=s/3600|0,m=(s%3600)/60|0,x=s%60;return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0');}
+let last=null;
+async function poll(){const d=await api('/api/status');if(!d.ok)return;
+ const tsel=document.getElementById('target');
+ if(JSON.stringify(d.targets)!==last){last=JSON.stringify(d.targets);tsel.innerHTML=d.targets.map(t=>`<option value="${t.i}">${t.name}</option>`).join('');}
+ tsel.value=d.target_index;
+ const n=d.now||{};
+ document.getElementById('np').textContent=n.title||'Nothing playing.';
+ document.getElementById('badge').style.display=n.live?'inline-block':'none';
+ const prog=document.getElementById('prog'),tm=document.getElementById('time');
+ if(n.live){prog.style.width='100%';tm.textContent=fmt(n.pos)+'  ·  live';}
+ else if(n.dur>0){prog.style.width=(100*Math.min(n.pos,n.dur)/n.dur)+'%';tm.textContent=fmt(n.pos)+' / '+fmt(n.dur)+(n.state&&n.state!=='PLAYING'?'  ·  '+n.state.toLowerCase():'');}
+ else{prog.style.width='0';tm.textContent=n.state?n.state.toLowerCase():'';}
+ document.getElementById('tv').textContent=d.tv||'';
+ anState=!!d.auto_next;const an=document.getElementById('an');an.textContent='Auto-next: '+(anState?'on':'off');an.classList.toggle('ac',anState);
+}
+let anState=true;
+function toggleAN(){anState=!anState;cmd({kind:'autonext',on:anState});}
+async function loadSources(){const d=await api('/api/status');const s=document.getElementById('source');
+ s.innerHTML=(d.sources||[]).map(x=>`<option value="${x.i}">${x.name}</option>`).join('');
+ if((d.sources||[]).length){s.value=curSrc;browse(curSrc,curSub);}else{document.getElementById('bmsg').textContent='No sources configured.';}
+}
+async function browse(src,sub){curSrc=+src;curSub=sub;
+ const d=await api('/api/browse?src='+src+'&sub='+encodeURIComponent(sub));
+ const list=document.getElementById('list'),msg=document.getElementById('bmsg');msg.textContent='';
+ if(!d.ok){list.innerHTML='';msg.textContent=d.error||'Could not open source.';return;}
+ document.getElementById('crumb').textContent='/'+(sub||'');
+ let h='';
+ if(d.up!==null)h+=`<button onclick="browse(${src},'${d.up.replace(/'/g,"\\'")}')"><span class="ic">↩</span> ..</button>`;
+ for(const e of d.entries){const r=e.rel.replace(/'/g,"\\'");
+  if(e.dir)h+=`<button onclick="browse(${src},'${r}')"><span class="ic">📁</span> ${e.name}</button>`;
+  else h+=`<button onclick="castFile('${e.path.replace(/'/g,"\\'")}','${e.name.replace(/'/g,"\\'")}')"><span class="ic">🎬</span> ${e.name}</button>`;}
+ list.innerHTML=h||'<div class="msg">Empty.</div>';
+}
+async function castFile(path,name){const b=document.getElementById('bmsg');b.textContent='Casting '+name+'…';
+ await cmd({kind:'cast',path:path});setTimeout(()=>{tab('play');},400);}
+poll();setInterval(poll,1500);
+</script></body></html>
