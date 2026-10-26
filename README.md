@@ -27,3 +27,6 @@ runs `vizgui.app:main`).
 - `app.py`        entry point
 
 Data lives in `~/.config/vizgui/config.json` (chmod 600) and logs in `~/.cache/viz-gui/`.
+
+## License
+MIT — see [LICENSE](LICENSE).
