@@ -9,7 +9,6 @@ so the pure logic can be unit-tested anywhere.
 """
 import ipaddress
 import os
-import re
 import subprocess
 
 from .base import CasterHandle, find_tool, has_tool
@@ -67,31 +66,28 @@ def mount_share(server, share, user="", domain="", password="", guest=False, tim
         return unc
     cmd = ["net", "use", unc]
     if guest:
-        cmd += ['""', "/user:guest"]
+        cmd += ["", "/user:guest"]   # "" (not '""'): subprocess escapes it to empty quotes
     else:
         if password:
             cmd.append(password)
         if user:
             cmd.append("/user:" + (f"{domain}\\{user}" if domain else user))
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                       creationflags=_CREATE_NO_WINDOW)
     if not os.path.isdir(unc):
         raise RuntimeError((p.stderr + p.stdout).strip() or "net use failed")
     return unc
 
 
 def lan_cidr(ip):
+    # PowerShell is language-agnostic (ipconfig headers are localized).
     try:
-        out = subprocess.run(["ipconfig"], capture_output=True, text=True, timeout=5).stdout
-        cur_ip = None
-        for line in out.splitlines():
-            m = re.search(r"IPv4 Address.*?:\s*([\d.]+)", line)
-            if m:
-                cur_ip = m.group(1)
-                continue
-            m = re.search(r"Subnet Mask.*?:\s*([\d.]+)", line)
-            if m and cur_ip == ip:
-                prefix = ipaddress.IPv4Network(f"0.0.0.0/{m.group(1)}", strict=False).prefixlen
-                return str(ipaddress.ip_network(f"{ip}/{prefix}", strict=False))
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"(Get-NetIPAddress -IPAddress '{ip}' -AddressFamily IPv4).PrefixLength"],
+            capture_output=True, text=True, timeout=8, creationflags=_CREATE_NO_WINDOW)
+        prefix = int(r.stdout.strip().splitlines()[0])
+        return str(ipaddress.ip_network(f"{ip}/{prefix}", strict=False))
     except Exception:
         pass
     return ".".join(ip.split(".")[:3]) + ".0/24"
@@ -148,7 +144,8 @@ def hw_encode_args():
         _HW_CACHE = None
         try:
             enc = subprocess.run([find_tool("ffmpeg"), "-hide_banner", "-encoders"],
-                                 capture_output=True, text=True, timeout=10).stdout
+                                 capture_output=True, text=True, timeout=10,
+                                 creationflags=_CREATE_NO_WINDOW).stdout
             if "h264_nvenc" in enc:
                 _HW_CACHE = ("-hwaccel cuda",
                              "-c:v h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 0 "

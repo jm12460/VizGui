@@ -312,9 +312,15 @@ class SetupDialog(QDialog):
             port = int(self.web_port.text())
         except ValueError:
             port = 8950
+        # Mutate the live config so the web token/PIN, auto_next and anything else
+        # survive — this dialog only owns sources, targets, and web enable/port.
+        config.CFG["sources"] = self.sources
+        config.CFG["targets"] = self.targets
+        web = config.CFG.setdefault("web", {"enabled": True, "port": 8950})
+        web["enabled"] = self.web_enabled.isChecked()
+        web["port"] = port
         try:
-            save_config({"sources": self.sources, "targets": self.targets,
-                         "web": {"enabled": self.web_enabled.isChecked(), "port": port}})
+            save_config(config.CFG)
         except Exception as e:
             QMessageBox.warning(self, "Save", "Could not save config:\n" + str(e))
             return

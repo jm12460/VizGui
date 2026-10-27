@@ -162,6 +162,14 @@ function hideLogin(){$('login').classList.remove('on');}
 async function api(p,o){o=o||{};o.headers=Object.assign({'X-Viz-Token':TOKEN},o.headers||{});
  try{const r=await fetch(p,o);if(r.status===401){showLogin();return{__401:true};}return await r.json();}catch(e){return{};}}
 function cmd(b){return api('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});}
+/* DOM builders — untrusted names/paths go through textContent + click closures,
+   never innerHTML or onclick strings, so a crafted filename can't inject script. */
+function opt(v,t){const o=document.createElement('option');o.value=v;o.textContent=t;return o;}
+function msgDiv(t){const d=document.createElement('div');d.className='msg';d.textContent=t;return d;}
+function listRow(icon,label,onClick){const b=document.createElement('button');
+ const s=document.createElement('span');s.className='ic';s.textContent=icon;
+ b.appendChild(s);b.appendChild(document.createTextNode(' '+label));
+ b.addEventListener('click',onClick);return b;}
 async function pair(){const pin=$('pinin').value;
  const r=await fetch('/api/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
  const d=await r.json().catch(_=>({}));
@@ -174,7 +182,7 @@ function tab(n){for(const v of ['remote','browse']){$('v-'+v).classList.toggle('
 function fmt(s){s=Math.max(0,s|0);let h=s/3600|0,m=(s%3600)/60|0,x=s%60;return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0');}
 async function poll(){const d=await api('/api/status');if(!d.ok)return;
  const tsel=$('target'),ts=JSON.stringify(d.targets);
- if(ts!==lastTargets){lastTargets=ts;tsel.innerHTML=d.targets.map(t=>`<option value="${t.i}">${t.name}</option>`).join('');}
+ if(ts!==lastTargets){lastTargets=ts;tsel.replaceChildren(...d.targets.map(t=>opt(t.i,t.name)));}
  tsel.value=d.target_index;
  const n=d.now||{};
  $('np').textContent=n.title||'Nothing playing.';
@@ -191,31 +199,33 @@ async function poll(){const d=await api('/api/status');if(!d.ok)return;
 function toggleAN(){anState=!anState;cmd({kind:'autonext',on:anState});const an=$('anbtn');an.textContent='Auto-next: '+(anState?'on':'off');an.classList.toggle('ac',anState);}
 /* ---- settings ---- */
 async function openSettings(){const d=await api('/api/status');if(d.__401)return;
- const s=$('setsrc');s.innerHTML=(d.sources||[]).map(x=>`<option value="${x.i}">${x.name}</option>`).join('');s.value=curSrc;
- $('devs').innerHTML='';$('settings').classList.add('on');}
+ const s=$('setsrc');s.replaceChildren(...(d.sources||[]).map(x=>opt(x.i,x.name)));s.value=curSrc;
+ $('devs').replaceChildren();$('settings').classList.add('on');}
 function closeSettings(){$('settings').classList.remove('on');}
-async function scanCast(){const box=$('devs');box.innerHTML='<div class="msg">Scanning…</div>';
+async function scanCast(){const box=$('devs');box.replaceChildren(msgDiv('Scanning…'));
  const d=await api('/api/scan');const devs=(d&&d.devices)||[];
- if(!devs.length){box.innerHTML='<div class="msg">No TVs found. Make sure it\'s on and on the same Wi-Fi.</div>';return;}
- box.innerHTML=devs.map(v=>`<button onclick='addCast(${JSON.stringify(v).replace(/'/g,"&#39;")})'>📺 ${v.name} (${v.addr})</button>`).join('');}
+ if(!devs.length){box.replaceChildren(msgDiv("No TVs found. Make sure it's on and on the same Wi-Fi."));return;}
+ box.replaceChildren();
+ for(const v of devs){const b=document.createElement('button');b.textContent=`📺 ${v.name} (${v.addr})`;
+  b.addEventListener('click',()=>addCast(v));box.appendChild(b);}}
 async function addCast(v){await cmd({kind:'addcast',name:v.name,addr:v.addr,cast_port:v.cast_port});setTimeout(poll,300);closeSettings();}
 function pickSource(i){curSrc=+i;curSub="";closeSettings();tab('browse');}
 /* ---- browse ---- */
 async function loadSources(){const d=await api('/api/status');const s=$('source');
- s.innerHTML=(d.sources||[]).map(x=>`<option value="${x.i}">${x.name}</option>`).join('');
- if((d.sources||[]).length){s.value=curSrc;browse(curSrc,curSub);}else{$('bmsg').textContent='No sources configured.';$('list').innerHTML='';}
+ s.replaceChildren(...(d.sources||[]).map(x=>opt(x.i,x.name)));
+ if((d.sources||[]).length){s.value=curSrc;browse(curSrc,curSub);}else{$('bmsg').textContent='No sources configured.';$('list').replaceChildren();}
 }
 async function browse(src,sub){curSrc=+src;curSub=sub;
  const d=await api('/api/browse?src='+src+'&sub='+encodeURIComponent(sub));
  const list=$('list'),msg=$('bmsg');msg.textContent='';
- if(!d.ok){list.innerHTML='';msg.textContent=d.error||'Could not open source.';return;}
+ if(!d.ok){list.replaceChildren();msg.textContent=d.error||'Could not open source.';return;}
  $('crumb').textContent='/'+(sub||'');
- let h='';
- if(d.up!==null)h+=`<button onclick="browse(${src},'${d.up.replace(/'/g,"\\'")}')"><span class="ic">↩</span> ..</button>`;
- for(const e of d.entries){const r=e.rel.replace(/'/g,"\\'");
-  if(e.dir)h+=`<button onclick="browse(${src},'${r}')"><span class="ic">📁</span> ${e.name}</button>`;
-  else h+=`<button onclick="castFile('${e.path.replace(/'/g,"\\'")}','${e.name.replace(/'/g,"\\'")}')"><span class="ic">🎬</span> ${e.name}</button>`;}
- list.innerHTML=h||'<div class="msg">Empty.</div>';
+ list.replaceChildren();
+ if(d.up!==null)list.appendChild(listRow('↩','..',()=>browse(src,d.up)));
+ for(const e of d.entries){
+  if(e.dir)list.appendChild(listRow('📁',e.name,()=>browse(src,e.rel)));
+  else list.appendChild(listRow('🎬',e.name,()=>castFile(e.path,e.name)));}
+ if(!list.children.length)list.appendChild(msgDiv('Empty.'));
 }
 async function castFile(path,name){const b=$('bmsg');b.textContent='Casting '+name+'…';
  await cmd({kind:'cast',path:path});setTimeout(poll,400);}

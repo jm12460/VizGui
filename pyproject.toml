@@ -19,10 +19,10 @@ classifiers = [
     "Topic :: Multimedia :: Video",
 ]
 
-# Only PySide6 is a Python dependency. The rest are system tools the app shells
-# out to (ffmpeg, vlc, playerctl, gvfs-smb, qrencode, and the go-chromecast
-# binary) and are declared by the OS package / documented in the README.
-dependencies = ["PySide6>=6.5"]
+# Python dependencies. The rest are system tools the app shells out to (ffmpeg,
+# vlc, playerctl, gvfs-smb, and the go-chromecast binary) and are declared by the
+# OS package / documented in the README.
+dependencies = ["PySide6>=6.5", "qrcode>=7"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]

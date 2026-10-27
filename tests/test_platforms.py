@@ -183,18 +183,33 @@ def test_windows_config_dir_uses_appdata():
         assert windows.config_dir().endswith("vizgui") and "Roaming" in windows.config_dir()
 
 
-def test_windows_lan_cidr_parses_ipconfig():
-    out = ("Ethernet adapter Ethernet:\n"
-           "   IPv4 Address. . . . . . . . . . . : 192.168.1.50\n"
-           "   Subnet Mask . . . . . . . . . . . : 255.255.254.0\n")
+def test_windows_lan_cidr_via_powershell():
     with mock.patch.object(windows.subprocess, "run",
-                           return_value=types.SimpleNamespace(stdout=out, returncode=0)):
+                           return_value=types.SimpleNamespace(stdout="23\n", returncode=0)):
         assert windows.lan_cidr("192.168.1.50") == "192.168.0.0/23"
 
 
 def test_windows_lan_cidr_fallback():
     with mock.patch.object(windows.subprocess, "run", side_effect=OSError):
         assert windows.lan_cidr("10.1.2.3") == "10.1.2.0/24"
+
+
+def test_windows_mount_guest_uses_empty_string_arg():
+    # guest arg must be "" (not '""', which subprocess would escape to \"\"),
+    # and the net-use call must suppress a console window.
+    calls = {}
+
+    def fake_run(cmd, **kw):
+        calls["cmd"] = cmd
+        calls["flags"] = kw.get("creationflags")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    # isdir False first (not mounted) -> net use -> True (now mounted)
+    with mock.patch.object(windows.subprocess, "run", fake_run), \
+         mock.patch.object(windows.os.path, "isdir", side_effect=[False, True]):
+        windows.mount_share("nas", "media", guest=True)
+    assert '""' not in calls["cmd"] and "" in calls["cmd"]
+    assert calls["flags"] == windows._CREATE_NO_WINDOW
 
 
 def test_windows_firewall_cmd_is_netsh():
@@ -271,3 +286,14 @@ def test_macos_mount_share_via_osascript():
         assert macos.mount_share("nas", "media", user="u", password="p") == "/Volumes/media"
     call = run.call_args.args[0]
     assert call[0] == "osascript" and "mount volume" in call[2] and "smb://" in call[2]
+
+
+def test_macos_find_mount_matches_server_and_share():
+    out = ("/dev/disk1 on / (apfs, local)\n"
+           "//guest@nas/media on /Volumes/media (smbfs, nodev, nosuid)\n")
+    with mock.patch.object(macos.subprocess, "run",
+                           return_value=types.SimpleNamespace(stdout=out, returncode=0)), \
+         mock.patch.object(macos.os.path, "isdir", lambda p: p == "/Volumes/media"):
+        assert macos.find_mount("nas", "media") == "/Volumes/media"
+        # same share name on a different server must NOT match
+        assert macos.find_mount("otherbox", "media") is None

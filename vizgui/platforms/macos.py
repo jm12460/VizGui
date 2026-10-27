@@ -57,8 +57,22 @@ def has_vlc():
 
 # ---- SMB: let Finder mount it (no sudo); shares land under /Volumes/<share> ----
 def find_mount(server, share):
-    p = os.path.join("/Volumes", share)
-    return p if os.path.isdir(p) else None
+    """Return the mountpoint of smb://server/share, matched by BOTH server and
+    share from ``mount`` output (so a same-named share from another server isn't
+    mistaken for this one)."""
+    try:
+        out = subprocess.run(["mount"], capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return None
+    sv, sh = server.lower(), share.lower()
+    for line in out.splitlines():
+        # //[user@]server/share on /Volumes/<name> (smbfs, ...)
+        m = re.match(r"//(?:[^@/]+@)?([^/]+)/(\S+) on (.+?) \(", line)
+        if m and m.group(1).lower() == sv and m.group(2).lower() == sh:
+            path = m.group(3)
+            if os.path.isdir(path):
+                return path
+    return None
 
 
 def mount_share(server, share, user="", domain="", password="", guest=False, timeout=30):

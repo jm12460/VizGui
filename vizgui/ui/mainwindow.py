@@ -2,10 +2,8 @@
 remote, and status together."""
 import os
 import secrets
-import subprocess
-
 from PySide6.QtCore import Qt, QTimer, QDir, QModelIndex
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QImage, QPainter, QColor
 from PySide6.QtWidgets import (
     QWidget, QMainWindow, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
     QFrame, QTreeView, QSplitter, QSizePolicy, QFileSystemModel, QProgressBar, QComboBox,
@@ -27,6 +25,33 @@ from ..playback import CastTarget, VlcTarget
 from ..playback import media
 from .remote import RemotePanel
 from .dialogs import SetupDialog, SmbDialog
+
+
+def qr_pixmap(data, box=8, border=3):
+    """Render ``data`` as a QR QPixmap via the pure-Python ``qrcode`` lib (no
+    external binary, no PIL — the module matrix is painted with QPainter).
+    Returns None if qrcode isn't importable, so the UI can fall back to the PIN."""
+    try:
+        import qrcode
+    except Exception:
+        return None
+    qr = qrcode.QRCode(border=border, box_size=1,
+                       error_correction=qrcode.constants.ERROR_CORRECT_M)
+    qr.add_data(data)
+    qr.make(fit=True)
+    matrix = qr.get_matrix()                 # list[list[bool]], includes the border
+    size = len(matrix) * box
+    img = QImage(size, size, QImage.Format_RGB32)
+    img.fill(QColor("white"))
+    painter = QPainter(img)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor("black"))
+    for y, row in enumerate(matrix):
+        for x, on in enumerate(row):
+            if on:
+                painter.drawRect(x * box, y * box, box, box)
+    painter.end()
+    return QPixmap.fromImage(img)
 
 
 class MainWindow(QMainWindow):
@@ -413,20 +438,12 @@ class MainWindow(QMainWindow):
         web = config.CFG.get("web", {})
         ip, port = local_ip(), web.get("port", 8950)
         url = f"http://{ip}:{port}/#t={web.get('token', '')}"
-        png = None
-        try:
-            r = subprocess.run(["qrencode", "-t", "PNG", "-s", "9", "-m", "2", "-o", "-", url],
-                               capture_output=True, timeout=5)
-            if r.returncode == 0:
-                png = r.stdout
-        except Exception:
-            pass
+        pm = qr_pixmap(url)
         dlg = QDialog(self); dlg.setWindowTitle("Pair a phone")
         lay = QVBoxLayout(dlg)
         head = QLabel("Scan with your phone's camera — it pairs instantly.")
         head.setWordWrap(True); lay.addWidget(head)
-        if png:
-            pm = QPixmap(); pm.loadFromData(png, "PNG")
+        if pm is not None:
             img = QLabel(); img.setPixmap(pm); img.setAlignment(Qt.AlignCenter)
             lay.addWidget(img)
         sub = QLabel(f"Or open  http://{ip}:{port}  and enter PIN  {web.get('pin', '------')}")
