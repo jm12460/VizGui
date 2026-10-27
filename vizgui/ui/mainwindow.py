@@ -1,13 +1,8 @@
 """The main window: ties media browsing, casting, transport, polling, the phone
 remote, and status together."""
-import glob
 import os
-import re
 import secrets
 import subprocess
-import time
-import urllib.parse
-from functools import partial
 
 from PySide6.QtCore import Qt, QTimer, QDir, QModelIndex
 from PySide6.QtGui import QPixmap
@@ -21,17 +16,15 @@ from .. import config
 from .. import platforms
 from .. import health
 from ..config import save_config, load_config
-from ..paths import GC, CACHE, VIDEO_GLOBS, CASTER_LOG, log
-from ..transcode import HAS_HW, write_wrapper
+from ..paths import VIDEO_GLOBS, log
 from ..smartcast import sc_status
-from ..chromecast import gc
-from ..vlc import (vlc_cmd, vlc_status, vlc_any_status, mpris_cmd, mpris_running,
-                   path_to_uri, VLC_PORT, VLC_PW)
 from ..sources import source_path
 from ..net import local_ip, lan_cidr
-from ..helpers import fmt_time, parse_status, cast_plan
+from ..helpers import fmt_time
 from ..qtasync import run_async
 from ..webremote import WebBridge, start_web_server
+from ..playback import CastTarget, VlcTarget
+from ..playback import media
 from .remote import RemotePanel
 from .dialogs import SetupDialog, SmbDialog
 
@@ -42,9 +35,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Basement Display")
         self.resize(980, 640)
         self.target = "cast"    # "cast" (TV via go-chromecast) or "vlc" (this PC)
-        self.vlc_proc = None    # the VLC process we launched (vlc target)
-        self._vlc_mode = None   # "http" (we launched it) or "mpris" (manual VLC)
-        self.caster = None      # the live go-chromecast process serving the TV
+        self.targets = {"cast": CastTarget(), "vlc": VlcTarget()}   # playback adapters
+        self.active = self.targets[self.target]
         self.now_title = None   # real filename of what we're casting (for display)
         self.now_live = False   # True while live-transcoding (no seek, no duration)
         self._casting = False   # True from click until the launch worker finishes
@@ -229,6 +221,7 @@ class MainWindow(QMainWindow):
         if not t:
             return
         self.target = t.get("type", "cast")
+        self.active = self.targets.get(self.target, self.targets["cast"])
         if self.target == "cast":
             config.set_active_cast(t)
         log.info("target -> %s (%s)", self.target, t.get("name"))
@@ -291,175 +284,19 @@ class MainWindow(QMainWindow):
             self._reload_targets()
             self._target_changed(self.target_box.currentIndex())
 
-    def _vcodec(self, path):
-        """Video codec name of the first video stream (e.g. 'h264', 'hevc')."""
-        try:
-            r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
-                                "-show_entries", "stream=codec_name",
-                                "-of", "default=nw=1:nk=1", path],
-                               capture_output=True, text=True, timeout=30)
-            return r.stdout.strip()
-        except Exception:
-            return ""
-
-    def _symlink_serve(self, path):
-        """Serve an H.264 file via a safe-named symlink in CACHE. go-chromecast
-        embeds the path in its URL query where '+' etc. misbehave, so the served
-        name must be sanitized; a symlink avoids copying."""
-        os.makedirs(CACHE, exist_ok=True)
-        safe = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(path)) or "video"
-        link = os.path.join(CACHE, safe)
-        try:
-            if os.path.lexists(link):
-                os.remove(link)
-            os.symlink(os.path.abspath(path), link)
-            return link
-        except OSError:
-            return path
-
-    def _launch_caster(self, args, env=None):
-        """Start the go-chromecast media server via the platform launcher (a PTY
-        on Linux so it keeps its HTTP server alive), output drained to the log.
-        Returns a handle; terminating it kills any ffmpeg transcode child too."""
-        self.caster = platforms.launch_caster(args, env=env, log_path=CASTER_LOG)
-        return self.caster
-
-    def _kill_caster(self):
-        """Terminate the go-chromecast server we own (if any), tree and all."""
-        h = self.caster
-        self.caster = None
-        if h:
-            h.terminate()
-
-    def _kill_vlc(self):
-        p = self.vlc_proc
-        self.vlc_proc = None
-        if p and p.poll() is None:
-            try:
-                p.terminate(); p.wait(timeout=3)
-            except Exception:
-                try:
-                    p.kill()
-                except Exception:
-                    pass
-
-    def _cast_vlc(self, path):
-        """Play a file/URL in VLC on this machine, with its HTTP control iface
-        enabled so our transport + Now Playing drive it. VLC handles every codec
-        and plays smb://, nfs://, http:// URLs directly - no transcode/serve."""
-        if not platforms.has_tool("vlc"):
-            self.np_title.setText("VLC is not installed.")
-            self._status("VLC isn't installed — can't use the VLC target.")
-            return
-        self.now_title = os.path.basename(path.rstrip("/")) or path
-        self.now_live = False
-        self._casting = True
-        self._np_pos = 0; self._np_playing = False
-        self.np_title.setText(f"Opening in VLC: {self.now_title}…")
-        self.np_bar.setRange(0, 1000); self.np_bar.setValue(0)
-        self.np_time.setText("")
-        self.b_cast.setEnabled(False)
-        log.info("VLC play: %s", path)
-
-        # auto-next: queue the rest of the folder (native, smooth playlist)
-        items = self._folder_queue(path) if (self.auto_next and os.path.sep in path) else [path]
-
-        def do():
-            # 1) Our HTTP VLC is running -> send the whole folder as a native
-            #    playlist (seamless auto-next).
-            if "error" not in vlc_status():
-                self._vlc_mode = "http"
-                vlc_cmd("pl_empty")
-                vlc_cmd("in_play&input=" + urllib.parse.quote(items[0]))
-                for it in items[1:]:
-                    vlc_cmd("in_enqueue&input=" + urllib.parse.quote(it))
-                log.info("VLC(http) reuse: %d item(s)", len(items))
-                return "playing"
-            # 2) A VLC opened by hand is running (no HTTP) -> control it over
-            #    MPRIS (where supported). Load this file; auto-next detect-and-load.
-            if platforms.supports_mpris() and mpris_running():
-                self._vlc_mode = "mpris"
-                mpris_cmd("open", path_to_uri(items[0]))
-                if self.auto_next:
-                    # turn off repeat so a finished episode STOPS -> we detect the
-                    # end and load the next (manual VLC often has loop on, which
-                    # would otherwise just restart the same episode).
-                    mpris_cmd("loop", "None")
-                log.info("VLC(mpris) open: %s (loop=%s)", items[0], "None" if self.auto_next else "kept")
-                return "playing"
-            # 3) No VLC at all -> launch our own (HTTP), STAYS OPEN, native
-            #    playlist. Survives app close (detached session).
-            self._vlc_mode = "http"
-            p = platforms.launch_detached(
-                ["vlc", "--extraintf", "http", "--http-host", "127.0.0.1",
-                 "--http-port", str(VLC_PORT), "--http-password", VLC_PW,
-                 "--no-random", "--no-loop", "--no-repeat", *items],
-                log_path=CASTER_LOG)
-            self.vlc_proc = p
-            ok = False
-            for _ in range(20):
-                time.sleep(0.5)
-                if p.poll() is not None:
-                    break
-                if "error" not in vlc_status():
-                    ok = True
-                    break
-            log.info("vlc pid=%s up=%s", p.pid, ok)
-            return "playing" if ok else "VLC failed to start (see caster.log)"
-
-        def done(res):
-            self._casting = False
-            self.b_cast.setEnabled(True)
-            if res != "playing":
-                self.np_title.setText(str(res))
-                self._status(f"Cast failed: {res}")
-            self.poll_cast()
-        run_async(do, done)
-
-    def _folder_queue(self, path):
-        """Sorted playable files in path's folder, from `path` to the end."""
-        folder = os.path.dirname(path)
-        exts = tuple(g[1:] for g in VIDEO_GLOBS)
-        try:
-            files = sorted((os.path.join(folder, f) for f in os.listdir(folder)
-                            if f.lower().endswith(exts) and os.path.isfile(os.path.join(folder, f))),
-                           key=str.lower)
-        except OSError:
-            return [path]
-        try:
-            return files[files.index(path):]
-        except ValueError:
-            return [path]
-
-    def _next_file(self, path):
-        q = self._folder_queue(path)
-        return q[1] if len(q) > 1 else None
-
-    def _prev_file(self, path):
-        folder = os.path.dirname(path)
-        exts = tuple(g[1:] for g in VIDEO_GLOBS)
-        try:
-            files = sorted((os.path.join(folder, f) for f in os.listdir(folder)
-                            if f.lower().endswith(exts) and os.path.isfile(os.path.join(folder, f))),
-                           key=str.lower)
-            i = files.index(path)
-            return files[i - 1] if i > 0 else None
-        except (OSError, ValueError):
-            return None
-
     def go_next(self):
-        if self.target == "vlc" and self._vlc_mode == "http":
-            run_async(lambda: vlc_cmd("pl_next"), lambda _: self.poll_cast())
-        elif self._now_path:   # cast, or vlc(mpris): load the next file ourselves
-            nxt = self._next_file(self._now_path)
+        if self.active.native_skip():
+            run_async(lambda: self.active.skip(1), lambda _: self.poll_cast())
+        elif self._now_path:
+            nxt = media.next_file(self._now_path)
             if nxt:
                 self._cast(nxt)
 
     def go_prev(self):
-        if self.target == "vlc" and self._vlc_mode == "http":
-            run_async(lambda: vlc_cmd("pl_previous"), lambda _: self.poll_cast())
+        if self.active.native_skip():
+            run_async(lambda: self.active.skip(-1), lambda _: self.poll_cast())
         elif self._now_path:
-            prv = self._prev_file(self._now_path)
+            prv = media.prev_file(self._now_path)
             if prv:
                 self._cast(prv)
 
@@ -475,130 +312,71 @@ class MainWindow(QMainWindow):
         self._now_path = path
         self._saw_playing = False
         self._user_stopped = False
-        if self.target == "vlc":
-            self._cast_vlc(path)
+        ok, msg = self.active.available()
+        if not ok:
+            self.np_title.setText(msg)
+            self._status(msg)
             return
-        if not platforms.has_tool("go-chromecast", health.GC_FALLBACKS):
-            self.np_title.setText("go-chromecast is not installed.")
-            self._status("go-chromecast isn't installed — can't cast to the TV.")
-            return
-        self.now_title = os.path.basename(path)   # real name, for the display
-        vcodec = self._vcodec(path)               # quick probe to choose the path
-        ext = os.path.splitext(path)[1]
-        plan = cast_plan(vcodec, ext)             # 'direct' | 'remux' | 'transcode'
-        direct = plan == "direct"                 # serve as-is, no ffmpeg
-        copy_video = plan == "remux"              # near-free container copy (H.264 mkv)
-        live = not direct
-        if live and not platforms.has_tool("ffmpeg"):
-            self.np_title.setText("ffmpeg is not installed.")
-            self._status("ffmpeg isn't installed — can't transcode/remux this file.")
-            return
-        self.now_live = live
-        self._casting = True                       # guard polls from clearing state
-        self._np_pos = 0; self._np_playing = False
-        verb = "Preparing" if direct else ("Remuxing (live)" if copy_video
-                                           else "Streaming (transcode)")
-        self.np_title.setText(f"{verb}: {self.now_title}…")
-        if live:
-            self.np_bar.setRange(0, 0)       # indeterminate; a live stream has no duration
-        else:
-            self.np_bar.setRange(0, 1000); self.np_bar.setValue(0)
+        self.now_title = os.path.basename(path.rstrip(os.sep)) or path
+        self._casting = True
+        self._np_pos = 0
+        self._np_playing = False
+        self.np_title.setText(f"Preparing: {self.now_title}\u2026")
+        self.np_bar.setRange(0, 0)          # indeterminate until the first status
         self.np_time.setText("")
+        self.np_badge.hide()
         self.b_cast.setEnabled(False)
-        log.info("CAST requested: %s (vcodec=%s, direct=%s, copy=%s)",
-                 path, vcodec, direct, copy_video)
-
-        def do():
-            self._kill_caster()                     # drop any server we were running
-            gc("stop")                              # end the receiver session cleanly
-            time.sleep(1)
-            base = [GC, "--addr", config.TV_IP, "--port", config.CAST_PORT]
-            if direct:
-                # H.264 mp4: serve the file directly via a symlink (no ffmpeg).
-                p = self._launch_caster(base + ["load", self._symlink_serve(path)])
-                what = "direct"
-            else:
-                # Live stream: go-chromecast runs our wrapper and streams its stdout
-                # to the TV. Instant start, no buffering. copy_video = a free remux
-                # (H.264 mkv), else NVENC/libx264 transcode (HEVC etc).
-                wrapper = write_wrapper(path, copy_video=copy_video)
-                p = self._launch_caster(base + ["transcode", "--content-type",
-                                                "video/mp4", "--command", wrapper])
-                what = ("live remux" if copy_video
-                        else f"live transcode ({'hw' if HAS_HW else 'cpu'})")
-            time.sleep(5)                           # let it establish + the TV start
-            alive = p.poll() is None
-            log.info("caster pid=%s alive=%s (%s)", p.pid, alive, what)
-            return "playing" if alive else f"go-chromecast exited (rc={p.returncode})"
+        items = media.folder_queue(path) if (self.auto_next and os.sep in path) else [path]
+        log.info("CAST requested: %s -> %s", path, self.active.name)
 
         def done(res):
             self._casting = False
             self.b_cast.setEnabled(True)
-            if isinstance(res, dict) and "error" in res:
-                self.np_title.setText("error: " + res["error"])
-                self._status("VLC error: " + res["error"])
-            elif res != "playing":
+            if res != "playing":
                 self.np_title.setText(str(res))
                 self._status(str(res))
-            # else: the status poll fills in title/progress
             self.poll_cast()
-        run_async(do, done)
+        run_async(lambda: self.active.start(path, items, self.auto_next), done)
 
-    def _stop(self):
-        self._kill_caster()
-        out = gc("stop")
-        for f in glob.glob(os.path.join(CACHE, "*")):
-            try:
-                os.remove(f)  # removes our temp mp4s and symlinks (not their targets)
-            except OSError:
-                pass
-        return out
-
-    # ---- transport (routed to the active target) ----
     def _t_rewind(self):
-        if self.target != "vlc":
-            return gc("rewind", "30")
-        return mpris_cmd("position", "30-") if self._vlc_mode == "mpris" else vlc_cmd("seek&val=-30")
+        return self.active.seek(-30)
 
     def _t_forward(self):
-        if self.target != "vlc":
-            return gc("seek", "30")
-        return mpris_cmd("position", "30+") if self._vlc_mode == "mpris" else vlc_cmd("seek&val=+30")
+        return self.active.seek(30)
 
     def _t_playpause(self):
-        if self.target != "vlc":
-            return gc("togglepause")
-        return mpris_cmd("play-pause") if self._vlc_mode == "mpris" else vlc_cmd("pl_pause")
+        return self.active.pause()
 
     def _t_stop(self):
-        self._user_stopped = True   # suppress auto-next for a deliberate stop
+        self._user_stopped = True
         if self.target == "vlc":
             self.now_title = None
-            # stop playback but leave VLC open, on whichever backend is active
-            return mpris_cmd("stop") if self._vlc_mode == "mpris" else vlc_cmd("pl_stop")
-        return self._stop()
+        return self.active.stop()
 
     def _on_ended(self):
-        """Current item finished on its own. Auto-advance (Cast, or VLC in MPRIS
-        mode where there's no native playlist) or clear. HTTP-mode VLC advances
-        its own playlist, so we don't drive it here."""
-        advance = self.auto_next and not self._user_stopped and self._now_path
-        app_driven = (self.target == "cast") or (self.target == "vlc" and self._vlc_mode == "mpris")
-        if advance and app_driven:
-            nxt = self._next_file(self._now_path)
+        """Current item finished. Auto-advance if the target needs us to, else clear."""
+        if (self.auto_next and not self._user_stopped and self._now_path
+                and self.active.needs_advance_on_end()):
+            nxt = media.next_file(self._now_path)
             if nxt:
                 log.info("auto-next -> %s", os.path.basename(nxt))
                 self._cast(nxt)
                 return
-        self._kill_caster()   # stop the Cast serving process; leave VLC open
-        self.now_title = None; self.now_live = False
-        self._saw_playing = False; self._now_path = None; self._np_playing = False
+        self.active.shutdown()
+        self.now_title = None
+        self.now_live = False
+        self._saw_playing = False
+        self._now_path = None
+        self._np_playing = False
         self.np_badge.hide()
-        self.np_title.setText("Nothing casting.")
-        self.np_bar.setRange(0, 1000); self.np_bar.setValue(0); self.np_time.setText("")
+        self.np_title.setText("Nothing playing.")
+        self.np_bar.setRange(0, 1000)
+        self.np_bar.setValue(0)
+        self.np_time.setText("")
 
     def closeEvent(self, event):
-        self._kill_caster()   # leave VLC running on its own
+        for t in self.targets.values():
+            t.shutdown()           # cast: kill the server; vlc: leave it running
         if self.httpd:
             try:
                 self.httpd.shutdown()
@@ -731,78 +509,37 @@ class MainWindow(QMainWindow):
             log.warning("web action %s failed: %s", kind, e)
 
     def poll_cast(self):
-        if self.target == "vlc":
-            run_async(vlc_any_status, self._vlc_done)
-        else:
-            run_async(lambda: gc("status", timeout=8), self._cast_done)
+        run_async(self.active.status, self._poll_done)
 
-    def _vlc_done(self, s):
-        if not isinstance(s, dict) or "error" in s:
-            # No VLC reachable on either backend
-            if self._casting or (self.vlc_proc and self.vlc_proc.poll() is None):
-                return
-            if self._saw_playing:          # VLC finished the playlist (or was closed)
-                self._on_ended()
-                return
-            self.now_title = None
-            self._np_playing = False
-            self.np_title.setText("Nothing playing in VLC.")
-            self.np_badge.hide()
-            self.np_bar.setRange(0, 1000); self.np_bar.setValue(0)
-            self.np_time.setText("")
+    def _poll_done(self, st):
+        if not isinstance(st, dict):
             return
-        state = s.get("state", "")
-        if state == "STOPPED" and not self._casting:
+        if st.get("idle"):
+            # our process still starting, or mid-launch -> transient, keep state
+            if self._casting or st.get("busy"):
+                return
             if self._saw_playing:
                 self._on_ended()
-                return
-            self.np_title.setText("Nothing playing in VLC.")
-            self.np_badge.hide()
-            self.np_bar.setValue(0); self.np_time.setText("")
-            self._np_playing = False
-            return
-        self.now_live = False
-        self._vlc_mode = s.get("_mode", self._vlc_mode)
-        # Track what VLC is actually on (esp. MPRIS / a manually-opened file) so
-        # Next/Prev know the folder, and the status filename is the display truth.
-        if s.get("path"):
-            self._now_path = s["path"]
-        self.np_title.setText(s.get("file", "") or self.now_title or "VLC")
-        self._np_pos = s.get("pos", 0)
-        self._np_dur = s.get("dur", 0)
-        self._np_state = state
-        self._np_playing = (state == "PLAYING")
-        if state == "PLAYING":
-            self._saw_playing = True
-        self._render_np()
-
-    def _cast_done(self, res):
-        ok, out = res if isinstance(res, tuple) else (False, str(res))
-        line = out.splitlines()[0] if out else ""
-        if not line or "Idle" in line or "Backdrop" in line:
-            # If we've already seen this cast play, an Idle means it FINISHED ->
-            # auto-advance (or stop). Otherwise it's the startup transient while
-            # the receiver app launches - keep the title/live flag.
-            if self._saw_playing and not self._casting:
-                self._on_ended()
-                return
-            if self._casting or (self.caster and self.caster.poll() is None):
                 return
             self.now_title = None
             self.now_live = False
             self._np_playing = False
-            self.np_title.setText("Nothing casting.")
             self.np_badge.hide()
+            self.np_title.setText("Nothing playing.")
             self.np_bar.setRange(0, 1000); self.np_bar.setValue(0)
             self.np_time.setText("")
             return
-        d = parse_status(line)
-        self.np_title.setText(self.now_title or d.get("file", "") or "Playing")
-        # resync the local clock to the TV's reported position, then let _tick
-        # advance it smoothly between the 3s polls.
-        self._np_pos = d.get("pos", 0)
-        self._np_dur = d.get("dur", 0)
-        self._np_state = d.get("state", "")
+        self.now_live = st.get("live", False)
+        if st.get("path"):          # MPRIS gives the real path -> Next/Prev + title
+            self._now_path = st["path"]
+        if self.target == "vlc":
+            title = st.get("file") or self.now_title or "VLC"
+        else:
+            title = self.now_title or st.get("file") or "Playing"
+        self.np_title.setText(title)
+        self._np_pos = st.get("pos", 0)
+        self._np_dur = st.get("dur", 0)
+        self._np_state = st.get("state", "")
         self._np_playing = self._np_state in ("PLAYING", "")
         if self._np_state == "PLAYING":
             self._saw_playing = True
