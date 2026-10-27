@@ -8,9 +8,11 @@ build/
 dist/
 *.egg-info/
 
-# makepkg build output (in packaging/)
-packaging/vizgui/
-packaging/src/
-packaging/pkg/
-packaging/*.pkg.tar.*
-packaging/*.SRCINFO
+# makepkg build output (per-package subdirs under packaging/<pkg>/)
+packaging/*/src/
+packaging/*/pkg/
+packaging/*/*.pkg.tar.*
+packaging/*/.SRCINFO
+packaging/*/*.log
+# vizgui-git clones the repo into this subdir while building:
+packaging/vizgui-git/vizgui/

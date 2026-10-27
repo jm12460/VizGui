@@ -62,8 +62,8 @@ makes manual testing untenable.
 - [x] **`CHANGELOG.md`** (keep-a-changelog style).
 - [x] Cut the first **`v0.1.0`** tag (release workflow builds sdist/wheel + the
       GitHub release).
-- [ ] Add a stable `vizgui` PKGBUILD built from the release tarball (alongside
-      `vizgui-git`).
+- [x] Add a stable `vizgui` PKGBUILD built from the v0.1.0 release tarball
+      (`packaging/vizgui/`), alongside `vizgui-git` (`packaging/vizgui-git/`).
 
 **Risk:** low.
 
