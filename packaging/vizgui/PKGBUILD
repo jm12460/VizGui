@@ -16,7 +16,7 @@ depends=(
     'vlc'          # VLC playback target
     'playerctl'    # MPRIS control of a hand-opened VLC
     'gvfs-smb'     # on-demand SMB mounts
-    'qrencode'     # phone-remote pairing QR (optional at runtime)
+    'qrencode'     # phone-remote pairing QR (v0.1.0 uses the qrencode CLI)
     'go-chromecast-git'  # casting; the only AUR dep (builds from Go source)
 )
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')

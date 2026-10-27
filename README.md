@@ -51,10 +51,10 @@ target and all codecs.
 
 ### Other distros / manual
 Install `python3`, `PySide6`, `ffmpeg`, `vlc`, `playerctl`, `gvfs` (SMB backend),
-`qrencode` (optional, for the pairing QR), plus the
-[`go-chromecast`](https://github.com/vishen/go-chromecast) binary on your `PATH`.
-Then `pipx install git+https://github.com/jm12460/VizGui.git`, or run
-`python -m vizgui` from a clone. Missing tools are reported in-app.
+plus the [`go-chromecast`](https://github.com/vishen/go-chromecast) binary on your
+`PATH`. Then `pipx install git+https://github.com/jm12460/VizGui.git` (which also
+pulls the `qrcode` lib for pairing), or run `python -m vizgui` from a clone.
+Missing tools are reported in-app.
 
 ## Platform support
 **Linux** is fully supported. OS-specific behavior (data paths, SMB mounting,
@@ -62,8 +62,8 @@ process launching, subnet/firewall, hardware encoder, VLC location) lives behind
 `vizgui/platforms/` behind a single contract, with `linux.py`, `windows.py`, and
 `macos.py` backends. **Windows and macOS backends exist but are experimental and
 untested on real hardware** — macOS should be close to complete; on Windows,
-casting of H.264 mp4 works, but live remux/transcode (bash wrapper) and the
-pairing QR (qrencode) still need Windows-native equivalents.
+casting of H.264 mp4 works, but live remux/transcode (currently a bash wrapper)
+still needs a Windows-native equivalent.
 
 ## Module layout
 ```

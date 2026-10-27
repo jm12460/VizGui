@@ -19,16 +19,16 @@ say() { printf '\n\033[1;36m==>\033[0m %s\n' "$*"; }
 say "Installing dependencies (you'll be asked for your password)..."
 if command -v pacman >/dev/null 2>&1; then
     sudo pacman -S --needed --noconfirm \
-        python pyside6 ffmpeg vlc playerctl gvfs-smb qrencode git curl
+        python pyside6 python-qrcode ffmpeg vlc playerctl gvfs-smb git curl
 elif command -v apt-get >/dev/null 2>&1; then
     sudo apt-get update
     sudo apt-get install -y \
-        python3 python3-pyside6 ffmpeg vlc playerctl gvfs-backends qrencode git curl
+        python3 python3-pyside6 python3-qrcode ffmpeg vlc playerctl gvfs-backends git curl
 elif command -v dnf >/dev/null 2>&1; then
     # vlc and the full ffmpeg build live in RPM Fusion on Fedora; install what's in
     # the default repos and let the user add the rest if they want the VLC target.
     sudo dnf install -y \
-        python3 python3-pyside6 ffmpeg-free playerctl gvfs-smb qrencode git curl || true
+        python3 python3-pyside6 python3-qrcode ffmpeg-free playerctl gvfs-smb git curl || true
     if ! command -v vlc >/dev/null 2>&1; then
         printf '\n\033[1;33mNote:\033[0m VLC (and the full ffmpeg build for some codecs) are in RPM Fusion.\n'
         printf '      To use the VLC target / all codecs: enable https://rpmfusion.org then\n'
@@ -37,7 +37,7 @@ elif command -v dnf >/dev/null 2>&1; then
 else
     echo "No supported package manager found (need pacman, apt, or dnf)." >&2
     echo "Install these manually, then re-run or use 'python -m vizgui':" >&2
-    echo "  python3, PySide6, ffmpeg, vlc, playerctl, gvfs (smb backend), qrencode, git, curl" >&2
+    echo "  python3, PySide6, python-qrcode, ffmpeg, vlc, playerctl, gvfs (smb backend), git, curl" >&2
     exit 1
 fi
 
