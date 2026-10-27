@@ -632,7 +632,11 @@ class MainWindow(QMainWindow):
             elif kind == "cast":
                 path = p.get("path", "")
                 if os.path.isfile(path) and path.lower().endswith(tuple(g[1:] for g in VIDEO_GLOBS)):
-                    self._cast(path)
+                    self._cast(path, int(p.get("resume", 0) or 0))
+            elif kind == "forget":
+                history.forget(p.get("path", ""))
+            elif kind == "clear":
+                history.clear()
         except Exception as e:
             log.warning("web action %s failed: %s", kind, e)
 

@@ -54,6 +54,14 @@ header .t{font-weight:800;font-size:17px}
 .crumb{color:var(--dim);font-size:13px;margin:0 2px 10px;word-break:break-all}
 .list button{display:flex;width:100%;align-items:center;gap:10px;text-align:left;padding:14px 12px;margin-bottom:8px;font-size:15px}
 .list .ic{opacity:.7}
+/* continue */
+.crow{display:flex;gap:8px;margin-bottom:8px;align-items:stretch}
+.cmain{flex:1;text-align:left;padding:12px;background:var(--btn2)}
+.ct{font-size:15px;font-weight:600;word-break:break-word}
+.cbar{height:5px;background:#0f1217;border-radius:3px;margin:8px 0 4px;overflow:hidden}
+.cbar>i{display:block;height:100%;background:var(--ac);border-radius:3px}
+.ctime{color:var(--dim);font-size:12px}
+.cx{width:46px;flex:none;color:var(--dim);font-size:16px}
 /* tabbar */
 nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#10131a;border-top:1px solid #242a33}
 nav button{flex:1;border:0;border-radius:0;background:transparent;color:var(--dim);padding:12px 0;font-size:12px;font-weight:700}
@@ -134,6 +142,14 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
  </div>
 </div>
 
+<div id="v-continue" class="view">
+ <div class="card">
+  <div id="clist"></div>
+  <div id="cmsg" class="msg"></div>
+  <button id="cclear" onclick="clearContinue()" style="width:100%;margin-top:4px">Clear all</button>
+ </div>
+</div>
+
 <div id="settings" class="overlay">
  <h2>Settings</h2>
  <div class="set-row"><div class="sect">AUTO-PLAY NEXT</div>
@@ -148,6 +164,7 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
 
 <nav>
  <button id="t-remote" class="on" onclick="tab('remote')"><span class="ico">⊕</span>Remote</button>
+ <button id="t-continue" onclick="tab('continue')"><span class="ico">↺</span>Continue</button>
  <button id="t-browse" onclick="tab('browse')"><span class="ico">≣</span>Browse</button>
 </nav>
 
@@ -178,7 +195,7 @@ async function pair(){const pin=$('pinin').value;
 function key(c){cmd({kind:'key',cmd:c});}
 function tr(a){cmd({kind:'transport',action:a});}
 function setTarget(i){cmd({kind:'target',index:+i});}
-function tab(n){for(const v of ['remote','browse']){$('v-'+v).classList.toggle('on',v===n);$('t-'+v).classList.toggle('on',v===n);}if(n==='browse')loadSources();}
+function tab(n){for(const v of ['remote','browse','continue']){$('v-'+v).classList.toggle('on',v===n);$('t-'+v).classList.toggle('on',v===n);}if(n==='browse')loadSources();if(n==='continue')loadContinue();}
 function fmt(s){s=Math.max(0,s|0);let h=s/3600|0,m=(s%3600)/60|0,x=s%60;return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0');}
 async function poll(){const d=await api('/api/status');if(!d.ok)return;
  const tsel=$('target'),ts=JSON.stringify(d.targets);
@@ -229,5 +246,30 @@ async function browse(src,sub){curSrc=+src;curSub=sub;
 }
 async function castFile(path,name){const b=$('bmsg');b.textContent='Casting '+name+'…';
  await cmd({kind:'cast',path:path});setTimeout(poll,400);}
+/* ---- continue watching ---- */
+function contRow(it){
+ const wrap=document.createElement('div');wrap.className='crow';
+ const main=document.createElement('button');main.className='cmain';
+ const t=document.createElement('div');t.className='ct';t.textContent=it.title||'?';main.appendChild(t);
+ const dur=it.dur||0;
+ if(dur){
+  const bar=document.createElement('div');bar.className='cbar';
+  const fill=document.createElement('i');fill.style.width=(100*Math.min(it.pos||0,dur)/dur)+'%';bar.appendChild(fill);main.appendChild(bar);
+  const tm=document.createElement('div');tm.className='ctime';tm.textContent=fmt(it.pos||0)+' / '+fmt(dur);main.appendChild(tm);
+ }
+ main.addEventListener('click',()=>resumeItem(it));
+ const x=document.createElement('button');x.className='cx';x.textContent='✕';x.title='Forget';
+ x.addEventListener('click',()=>forgetItem(it.path));
+ wrap.appendChild(main);wrap.appendChild(x);return wrap;
+}
+async function loadContinue(){const d=await api('/api/history');const items=(d&&d.items)||[];
+ const list=$('clist'),msg=$('cmsg');msg.textContent='';list.replaceChildren();
+ $('cclear').style.display=items.length?'':'none';
+ if(!items.length){msg.textContent='Nothing to continue yet — play something and it\'ll show up here.';return;}
+ for(const it of items)list.appendChild(contRow(it));
+}
+function resumeItem(it){cmd({kind:'cast',path:it.path,resume:it.pos||0});setTimeout(poll,400);tab('remote');}
+async function forgetItem(path){await cmd({kind:'forget',path:path});loadContinue();}
+async function clearContinue(){await cmd({kind:'clear'});loadContinue();}
 poll();setInterval(poll,1500);
 </script></body></html>
