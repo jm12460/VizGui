@@ -51,13 +51,16 @@ class RemotePanel(QFrame):
             grid.addWidget(rkey(lab, cmd), i // 2, i % 2)
         v.addLayout(grid)
 
-        # volume rocker + mute/info
+        # volume rocker (left) + mute/info (right), each a joined two-button column
+        def rockered(top_btn, bot_btn):
+            top_btn.setProperty("rocker", "top"); bot_btn.setProperty("rocker", "bottom")
+            col = QVBoxLayout(); col.setSpacing(0)
+            col.addWidget(top_btn); col.addWidget(bot_btn)
+            return col
         volr = QHBoxLayout(); volr.setSpacing(10)
-        volr.addWidget(rkey("Vol −", "voldown")); volr.addWidget(rkey("Vol +", "volup"))
+        volr.addLayout(rockered(rkey("Vol +", "volup"), rkey("Vol −", "voldown")), 1)
+        volr.addLayout(rockered(rkey("Mute", "mute"), rkey("Info", "info")), 1)
         v.addLayout(volr)
-        mi = QHBoxLayout(); mi.setSpacing(10)
-        mi.addWidget(rkey("Mute", "mute")); mi.addWidget(rkey("Info", "info"))
-        v.addLayout(mi)
 
         # ---- media transport (always enabled - drives the cast session) ----
         div = QFrame(); div.setObjectName("divider"); div.setFixedHeight(1)

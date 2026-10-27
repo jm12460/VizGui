@@ -31,6 +31,9 @@ QPushButton.accent:pressed { background: #356bea; }
 QPushButton.rkey { background: #1b2029; border: 1px solid #2a313c; }
 QPushButton.rkey:hover { background: #262d39; }
 QPushButton.rkey:pressed { background: #313a48; }
+/* joined rocker: square off the touching edge so the pair reads as one control */
+QPushButton.rkey[rocker="top"] { border-bottom-left-radius: 0; border-bottom-right-radius: 0; min-height: 20px; }
+QPushButton.rkey[rocker="bottom"] { border-top-left-radius: 0; border-top-right-radius: 0; min-height: 20px; }
 QPushButton#power { background: #e5484d; border: 1px solid #f05b60; color: #ffffff;
     border-radius: 23px; font-size: 18px; }
 QPushButton#power:hover { background: #f05b60; }
