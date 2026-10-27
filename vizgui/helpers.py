@@ -1,6 +1,23 @@
-"""Small pure helpers: time formatting and go-chromecast status parsing."""
+"""Small pure helpers: time formatting, status parsing, cast planning."""
 import os
 import re
+
+# Containers a Cast receiver plays directly (no repackaging) when the video is H.264.
+DIRECT_CONTAINERS = ("mp4", "m4v", "mov")
+
+
+def cast_plan(vcodec, ext):
+    """How to send a file to a Cast device, given its video codec and extension:
+      'direct'    -> serve the file as-is (H.264 in an mp4-family container)
+      'remux'     -> container copy only, no re-encode (H.264 in e.g. mkv)
+      'transcode' -> re-encode the video to H.264 (HEVC and everything else)
+    This keeps go-chromecast off its own slow CPU transcode path."""
+    ext = (ext or "").lower().lstrip(".")
+    if vcodec == "h264" and ext in DIRECT_CONTAINERS:
+        return "direct"
+    if vcodec == "h264":
+        return "remux"
+    return "transcode"
 
 
 def fmt_time(s):

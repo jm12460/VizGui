@@ -30,3 +30,11 @@ Data lives in `~/.config/vizgui/config.json` (chmod 600) and logs in `~/.cache/v
 
 ## License
 MIT — see [LICENSE](LICENSE).
+
+## Tests
+```
+pytest            # requires pytest (e.g. `sudo pacman -S python-pytest`)
+```
+Pure-logic unit tests live in `tests/` (no GUI/network/hardware needed): status
+parsing, cast planning, config save/load, VLC/MPRIS/Chromecast parsing, the
+transcode wrapper, web browsing, and subnet detection.

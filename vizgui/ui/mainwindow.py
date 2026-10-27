@@ -30,7 +30,7 @@ from ..vlc import (vlc_cmd, vlc_status, vlc_any_status, mpris_cmd, mpris_running
                    path_to_uri, VLC_PORT, VLC_PW)
 from ..sources import source_path
 from ..net import local_ip, lan_cidr
-from ..helpers import fmt_time, parse_status
+from ..helpers import fmt_time, parse_status, cast_plan
 from ..qtasync import run_async
 from ..webremote import WebBridge, start_web_server
 from .remote import RemotePanel
@@ -491,13 +491,10 @@ class MainWindow(QMainWindow):
             return
         self.now_title = os.path.basename(path)   # real name, for the display
         vcodec = self._vcodec(path)               # quick probe to choose the path
-        ext = os.path.splitext(path)[1].lower().lstrip(".")
-        # The TV plays H.264 in an mp4-family container directly (no ffmpeg at all).
-        direct = (vcodec == "h264" and ext in ("mp4", "m4v", "mov"))
-        # Otherwise stream live. H.264 just needs a container REMUX (-c:v copy,
-        # near-free); anything else is a real GPU/CPU transcode to H.264. Either
-        # way this avoids go-chromecast's own slow CPU transcode of mkv/etc.
-        copy_video = (vcodec == "h264")
+        ext = os.path.splitext(path)[1]
+        plan = cast_plan(vcodec, ext)             # 'direct' | 'remux' | 'transcode'
+        direct = plan == "direct"                 # serve as-is, no ffmpeg
+        copy_video = plan == "remux"              # near-free container copy (H.264 mkv)
         live = not direct
         self.now_live = live
         self._casting = True                       # guard polls from clearing state
