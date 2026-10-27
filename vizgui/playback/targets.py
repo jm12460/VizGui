@@ -86,6 +86,9 @@ class CastTarget(PlaybackTarget):
     def seek(self, secs):
         return gc("rewind", str(-secs)) if secs < 0 else gc("seek", str(secs))
 
+    def seek_to(self, secs):
+        return gc("seek-to", str(int(secs)))
+
     def needs_advance_on_end(self):
         return True
 
@@ -166,6 +169,11 @@ class VlcTarget(PlaybackTarget):
         if self.mode == "mpris":
             return mpris_cmd("position", f"{abs(secs)}{'-' if secs < 0 else '+'}")
         return vlc_cmd(f"seek&val={'+' if secs >= 0 else '-'}{abs(secs)}")
+
+    def seek_to(self, secs):
+        if self.mode == "mpris":
+            return mpris_cmd("position", str(int(secs)))     # absolute seconds
+        return vlc_cmd(f"seek&val={int(secs)}")              # absolute seconds
 
     def native_skip(self):
         return self.mode == "http"

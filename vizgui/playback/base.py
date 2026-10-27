@@ -40,6 +40,10 @@ class PlaybackTarget:
         """Relative seek by `secs` seconds (may be negative)."""
         return True, ""
 
+    def seek_to(self, secs):
+        """Seek to an absolute position in seconds (for chapter jumps etc.)."""
+        return True, ""
+
     def native_skip(self):
         """True if the target advances its own playlist (so skip() handles next/
         prev); False means the controller should load the next/prev file."""

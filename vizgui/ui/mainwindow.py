@@ -8,13 +8,14 @@ from PySide6.QtGui import QPixmap, QImage, QPainter, QColor
 from PySide6.QtWidgets import (
     QWidget, QMainWindow, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
     QFrame, QTreeView, QSplitter, QSizePolicy, QFileSystemModel, QProgressBar, QComboBox,
-    QDialog, QDialogButtonBox, QMessageBox, QCheckBox, QListWidget, QListWidgetItem,
+    QDialog, QDialogButtonBox, QMessageBox, QCheckBox, QListWidget, QListWidgetItem, QMenu,
 )
 
 from .. import config
 from .. import platforms
 from .. import health
 from .. import history
+from .. import probe
 from ..config import save_config, load_config
 from ..paths import VIDEO_GLOBS, log
 from ..smartcast import sc_status
@@ -75,6 +76,7 @@ class MainWindow(QMainWindow):
         self._np_pos = 0; self._np_dur = 0; self._np_state = ""; self._np_playing = False
         self._resume_base = 0       # seconds a live stream was resumed from (pos is relative)
         self._last_save = 0.0       # throttle history writes during playback
+        self._media = {"audio": [], "subs": [], "chapters": []}   # ffprobe of current file
 
         root = QWidget(); self.setCentralWidget(root)
         outer = QHBoxLayout(root)
@@ -147,10 +149,13 @@ class MainWindow(QMainWindow):
         nhdr = QHBoxLayout()
         nt = QLabel("NOW PLAYING"); nt.setObjectName("title")
         self.np_badge = QLabel("● LIVE"); self.np_badge.setObjectName("badge"); self.np_badge.hide()
+        self.b_chapters = QPushButton("Chapters ▾"); self.b_chapters.hide()
+        self.b_chapters.clicked.connect(self._chapters_menu)
         self.autonext_cb = QCheckBox("Auto-play next")
         self.autonext_cb.setChecked(self.auto_next)
         self.autonext_cb.toggled.connect(self._set_autonext)
         nhdr.addWidget(nt); nhdr.addStretch(1); nhdr.addWidget(self.np_badge)
+        nhdr.addWidget(self.b_chapters)
         nhdr.addWidget(self.autonext_cb)
         nl.addLayout(nhdr)
         self.np_title = QLabel("Nothing casting."); self.np_title.setObjectName("now")
@@ -447,6 +452,33 @@ class MainWindow(QMainWindow):
                 self._status(str(res))
             self.poll_cast()
         run_async(lambda: self.active.start(path, items, self.auto_next, resume), done)
+        self._media = {"audio": [], "subs": [], "chapters": []}
+        self.b_chapters.hide()
+        run_async(lambda: probe.probe(path), self._probe_done)
+
+    def _probe_done(self, res):
+        self._media = res if isinstance(res, dict) and "chapters" in res else \
+            {"audio": [], "subs": [], "chapters": []}
+        self.b_chapters.setVisible(bool(self._media.get("chapters")))
+
+    def _chapters_menu(self):
+        chaps = self._media.get("chapters", [])
+        if not chaps:
+            return
+        menu = QMenu(self)
+        for c in chaps:
+            act = menu.addAction(f"{fmt_time(c['start'])}    {c['title']}")
+            act.triggered.connect(lambda _=False, s=c["start"]: self._jump_to(s))
+        menu.exec(self.b_chapters.mapToGlobal(self.b_chapters.rect().bottomLeft()))
+
+    def _jump_to(self, secs):
+        """Jump to an absolute time (chapter). A live stream can't seek, so restart
+        it at the offset; direct cast and VLC seek in place."""
+        secs = int(secs)
+        if self.now_live and self._now_path:
+            self._cast(self._now_path, secs)
+        else:
+            run_async(lambda: self.active.seek_to(secs), lambda _: self.poll_cast())
 
     def _t_rewind(self):
         return self.active.seek(-30)
@@ -480,6 +512,8 @@ class MainWindow(QMainWindow):
         self._saw_playing = False
         self._now_path = None
         self._np_playing = False
+        self._media = {"audio": [], "subs": [], "chapters": []}
+        self.b_chapters.hide()
         self.np_badge.hide()
         self.np_title.setText("Nothing playing.")
         self.np_bar.setRange(0, 1000)
@@ -590,6 +624,7 @@ class MainWindow(QMainWindow):
             "tv": self._tv_text if config.HOST else "",
             "now": {"title": self.now_title or "", "pos": self._np_pos,
                     "dur": self._np_dur, "state": self._np_state, "live": self.now_live},
+            "chapters": self._media.get("chapters", []),
         }
 
     def web_add_cast(self, dev):
@@ -643,6 +678,8 @@ class MainWindow(QMainWindow):
                 history.forget(p.get("path", ""))
             elif kind == "clear":
                 history.clear()
+            elif kind == "jump":
+                self._jump_to(int(p.get("secs", 0) or 0))
         except Exception as e:
             log.warning("web action %s failed: %s", kind, e)
 
