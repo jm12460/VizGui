@@ -81,5 +81,9 @@ Pure-logic unit tests in `tests/` (no GUI/network/hardware): status & cast
 planning, config, VLC/MPRIS/Chromecast parsing, the transcode wrapper, web
 browsing, subnet detection, the platform layer, and the health check.
 
+## Roadmap
+Headed toward easy, out-of-the-box install on Linux (AUR/Flatpak) and, later,
+Windows and macOS. See [ROADMAP.md](ROADMAP.md).
+
 ## License
 MIT — see [LICENSE](LICENSE).
