@@ -136,7 +136,12 @@ _HW_CACHE = _HW_UNSET
 
 
 def hw_encode_args():
-    """NVENC (NVIDIA) if ffmpeg has it, else None (software libx264). Cached."""
+    """NVENC (NVIDIA) if ffmpeg has it, else None (software libx264).
+
+    Decode on the CPU and convert to 8-bit 4:2:0 before H.264 encoding. CUDA
+    decoding can leave 10-bit HEVC frames in a format that H.264 NVENC cannot
+    consume, even though the encoder itself is available.
+    """
     global _HW_CACHE
     if _HW_CACHE is _HW_UNSET:
         _HW_CACHE = None
@@ -144,8 +149,8 @@ def hw_encode_args():
             r = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
                                capture_output=True, text=True, timeout=10)
             if "h264_nvenc" in r.stdout:
-                _HW_CACHE = ("-hwaccel cuda",
-                             "-c:v h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 0 "
+                _HW_CACHE = ("",
+                             "-c:v h264_nvenc -pix_fmt yuv420p -preset p4 -rc vbr -cq 23 -b:v 0 "
                              "-maxrate 12M -bufsize 24M -g 48 -bf 0")
         except Exception:
             _HW_CACHE = None

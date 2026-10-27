@@ -88,7 +88,7 @@ def test_linux_hw_encode_args_detects_nvenc():
                            return_value=types.SimpleNamespace(stdout="V... h264_nvenc NVIDIA\n", returncode=0)):
         a = linux.hw_encode_args()
     linux._HW_CACHE = linux._HW_UNSET
-    assert a and a[0] == "-hwaccel cuda" and "h264_nvenc" in a[1]
+    assert a and not a[0] and "h264_nvenc" in a[1] and "-pix_fmt yuv420p" in a[1]
 
 
 def test_linux_hw_encode_args_none_without_nvenc():
