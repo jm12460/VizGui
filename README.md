@@ -57,10 +57,13 @@ Then `pipx install git+https://github.com/jm12460/VizGui.git`, or run
 `python -m vizgui` from a clone. Missing tools are reported in-app.
 
 ## Platform support
-Linux only for now. OS-specific behavior (data paths, SMB mounting, process
-launching, subnet/firewall, hardware encoder) lives behind `vizgui/platforms/`,
-so macOS/Windows support is a matter of adding `macos.py` / `windows.py` that
-implement the same contract — the rest of the app is OS-agnostic.
+**Linux** is fully supported. OS-specific behavior (data paths, SMB mounting,
+process launching, subnet/firewall, hardware encoder, VLC location) lives behind
+`vizgui/platforms/` behind a single contract, with `linux.py`, `windows.py`, and
+`macos.py` backends. **Windows and macOS backends exist but are experimental and
+untested on real hardware** — macOS should be close to complete; on Windows,
+casting of H.264 mp4 works, but live remux/transcode (bash wrapper) and the
+pairing QR (qrencode) still need Windows-native equivalents.
 
 ## Module layout
 ```

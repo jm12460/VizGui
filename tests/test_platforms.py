@@ -172,3 +172,102 @@ def test_linux_default_media_dirs_only_existing():
 def test_base_default_media_dirs_contract_default():
     # the contract default returns a list (whatever exists on the box)
     assert isinstance(base.default_media_dirs(), list)
+
+
+# ================= Windows backend (pure logic; runs anywhere via mocks) =======
+from vizgui.platforms import windows, macos  # noqa: E402
+
+
+def test_windows_config_dir_uses_appdata():
+    with mock.patch.dict(windows.os.environ, {"APPDATA": r"C:\Users\x\AppData\Roaming"}):
+        assert windows.config_dir().endswith("vizgui") and "Roaming" in windows.config_dir()
+
+
+def test_windows_lan_cidr_parses_ipconfig():
+    out = ("Ethernet adapter Ethernet:\n"
+           "   IPv4 Address. . . . . . . . . . . : 192.168.1.50\n"
+           "   Subnet Mask . . . . . . . . . . . : 255.255.254.0\n")
+    with mock.patch.object(windows.subprocess, "run",
+                           return_value=types.SimpleNamespace(stdout=out, returncode=0)):
+        assert windows.lan_cidr("192.168.1.50") == "192.168.0.0/23"
+
+
+def test_windows_lan_cidr_fallback():
+    with mock.patch.object(windows.subprocess, "run", side_effect=OSError):
+        assert windows.lan_cidr("10.1.2.3") == "10.1.2.0/24"
+
+
+def test_windows_firewall_cmd_is_netsh():
+    cmd = windows.firewall_allow_cmd("10.0.0.0/24", 8950)
+    assert cmd.startswith("netsh advfirewall firewall add rule")
+    assert "localport=8950" in cmd and "remoteip=10.0.0.0/24" in cmd
+
+
+def test_windows_hw_encode_prefers_nvenc():
+    windows._HW_CACHE = windows._HW_UNSET
+    with mock.patch.object(windows.subprocess, "run",
+                           return_value=types.SimpleNamespace(stdout="h264_nvenc h264_qsv h264_amf", returncode=0)):
+        a = windows.hw_encode_args()
+    windows._HW_CACHE = windows._HW_UNSET
+    assert a and "h264_nvenc" in a[1]
+
+
+def test_windows_hw_encode_falls_to_qsv():
+    windows._HW_CACHE = windows._HW_UNSET
+    with mock.patch.object(windows.subprocess, "run",
+                           return_value=types.SimpleNamespace(stdout="has h264_qsv only", returncode=0)):
+        a = windows.hw_encode_args()
+    windows._HW_CACHE = windows._HW_UNSET
+    assert a and "h264_qsv" in a[1]
+
+
+def test_windows_vlc_exe_from_fallback():
+    with mock.patch.object(windows, "find_tool",
+                           return_value=r"C:\Program Files\VideoLAN\VLC\vlc.exe"):
+        assert windows.vlc_exe().endswith("vlc.exe")
+
+
+def test_windows_find_mount_unc():
+    with mock.patch.object(windows.os.path, "isdir", lambda p: p == r"\\nas\media"):
+        assert windows.find_mount("nas", "media") == r"\\nas\media"
+        assert windows.find_mount("nas", "other") is None
+
+
+# ================= macOS backend ===============================================
+def test_macos_config_dir_in_library():
+    assert macos.config_dir().endswith("Library/Application Support/vizgui")
+
+
+def test_macos_default_media_dirs_uses_movies():
+    with mock.patch.object(macos.os.path, "isdir", lambda p: True):
+        assert [n for n, _ in macos.default_media_dirs()] == ["Movies", "Music", "Downloads"]
+
+
+def test_macos_lan_cidr_parses_ifconfig_hexmask():
+    out = "en0: flags=8863\n\tinet 10.0.0.5 netmask 0xffffff00 broadcast 10.0.0.255\n"
+    with mock.patch.object(macos.subprocess, "run",
+                           return_value=types.SimpleNamespace(stdout=out, returncode=0)):
+        assert macos.lan_cidr("10.0.0.5") == "10.0.0.0/24"
+
+
+def test_macos_lan_cidr_fallback():
+    with mock.patch.object(macos.subprocess, "run", side_effect=OSError):
+        assert macos.lan_cidr("172.16.3.4") == "172.16.3.0/24"
+
+
+def test_macos_hw_encode_videotoolbox():
+    macos._HW_CACHE = macos._HW_UNSET
+    with mock.patch.object(macos.subprocess, "run",
+                           return_value=types.SimpleNamespace(stdout="V... h264_videotoolbox VideoToolbox", returncode=0)):
+        a = macos.hw_encode_args()
+    macos._HW_CACHE = macos._HW_UNSET
+    assert a and "h264_videotoolbox" in a[1]
+
+
+def test_macos_mount_share_via_osascript():
+    with mock.patch.object(macos.subprocess, "run",
+                           return_value=types.SimpleNamespace(returncode=0, stdout="", stderr="")) as run, \
+         mock.patch.object(macos, "find_mount", side_effect=[None, "/Volumes/media"]):
+        assert macos.mount_share("nas", "media", user="u", password="p") == "/Volumes/media"
+    call = run.call_args.args[0]
+    assert call[0] == "osascript" and "mount volume" in call[2] and "smb://" in call[2]

@@ -100,19 +100,27 @@ The ease-of-use half. Mostly hardening what already exists.
 
 ## Phase 4 — Windows & macOS backends
 
-Write `windows.py` / `macos.py` filling the existing platform contract.
+`windows.py` / `macos.py` fill the existing platform contract (shared POSIX
+process launch factored into `_posix.py`). Written here; **untested on real
+Windows/macOS** — pure logic is unit-tested, hardware behavior is not.
 
-- [ ] **Windows:** `%APPDATA%` paths; find VLC in Program Files; SMB via
-      UNC/`net use`; firewall via `netsh`; no MPRIS; no PTY (use
-      `CREATE_NO_WINDOW`); hw encode nvenc/qsv/amf.
-- [ ] **macOS:** `~/Library` paths; VLC at `/Applications/VLC.app/...`; SMB via
-      `mount_smbfs`; no MPRIS (HTTP-only VLC control); hw encode videotoolbox.
-- [ ] Replace the `qrencode` CLI with the **`qrcode` Python lib** as the
-      cross-platform fallback everywhere.
-- [ ] Add platform tests (`test_platforms.py`) for the new backends.
+- [x] **Windows:** `%APPDATA%`/`%LOCALAPPDATA%` paths; VLC in Program Files; SMB
+      via UNC/`net use`; firewall via `netsh`; no MPRIS; `CREATE_NO_WINDOW` +
+      taskkill tree; hw encode nvenc/qsv/amf.
+- [x] **macOS:** `~/Library` paths; VLC at `/Applications/VLC.app/...`; SMB via
+      Finder (`osascript mount volume` → /Volumes); `ifconfig` subnet; no MPRIS;
+      hw encode videotoolbox; PTY caster shared with Linux.
+- [x] Add `vlc_exe()`/`has_vlc()` to the contract so VLC is found off-PATH.
+- [x] Platform unit tests for both backends (`test_platforms.py`).
+- [ ] Replace the `qrencode` CLI with the **`qrcode` Python lib** so QR pairing
+      works on Win/Mac (currently degrades to PIN there).
+- [ ] **Windows transcode/remux:** `write_wrapper` emits a bash script, so only
+      direct-cast works on Windows — needs a `.bat`/host-native wrapper (macOS
+      has bash, so it's fine there).
+- [ ] Verify go-chromecast stays alive on Windows without a PTY (unknown).
 
 **Risk:** medium — volume of per-OS detail, but the contract says exactly what
-to fill.
+to fill. Real-hardware testing is the remaining unknown.
 
 ## Phase 5 — Windows & macOS packaging
 

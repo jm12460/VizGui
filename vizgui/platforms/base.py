@@ -50,6 +50,17 @@ def has_tool(name, fallbacks=()):
     return any(os.path.isfile(os.path.expanduser(f)) for f in fallbacks)
 
 
+def vlc_exe():
+    """Path/name used to launch VLC. Linux finds ``vlc`` on PATH; Windows/macOS
+    override with their install locations."""
+    return find_tool("vlc")
+
+
+def has_vlc():
+    """True if VLC is installed (so the VLC playback target can be used)."""
+    return has_tool("vlc")
+
+
 def mount_share(server, share, user="", domain="", password="", guest=False, timeout=30):
     """Mount an SMB share and return a local path. Overridden per-OS."""
     raise NotImplementedError("Mounting SMB shares is not supported on this platform")

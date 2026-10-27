@@ -7,7 +7,8 @@ def _fake_has(present):
 
 def test_nothing_missing_when_all_present():
     cfg = {"targets": [{"type": "cast"}, {"type": "vlc"}]}
-    assert health.missing(cfg, _fake_has({"go-chromecast", "ffmpeg", "vlc"})) == []
+    assert health.missing(cfg, _fake_has({"go-chromecast", "ffmpeg"}),
+                          vlc_present=lambda: True) == []
 
 
 def test_cast_needs_gochromecast_and_ffmpeg():
@@ -19,7 +20,8 @@ def test_cast_needs_gochromecast_and_ffmpeg():
 
 def test_vlc_target_needs_vlc_only():
     cfg = {"targets": [{"type": "vlc"}]}
-    assert [t for t, _ in health.missing(cfg, _fake_has(set()))] == ["vlc"]
+    assert [t for t, _ in health.missing(cfg, _fake_has(set()),
+                                         vlc_present=lambda: False)] == ["vlc"]
 
 
 def test_empty_targets_needs_nothing():
@@ -28,5 +30,5 @@ def test_empty_targets_needs_nothing():
 
 def test_each_entry_has_a_consequence_string():
     cfg = {"targets": [{"type": "cast"}, {"type": "vlc"}]}
-    for tool, why in health.missing(cfg, _fake_has(set())):
+    for tool, why in health.missing(cfg, _fake_has(set()), vlc_present=lambda: False):
         assert isinstance(why, str) and why

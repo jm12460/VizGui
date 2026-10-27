@@ -1,14 +1,12 @@
 """Linux OS integration: XDG dirs, gvfs (userspace) SMB mounts, `ip addr` subnet
-detection, ufw firewall, and D-Bus/MPRIS availability."""
+detection, ufw/firewalld firewall, and D-Bus/MPRIS availability. POSIX process
+launching is shared with macOS in ``_posix``."""
 import ipaddress
 import os
-import pty
 import re
-import signal
 import subprocess
-import threading
 
-from .base import CasterHandle
+from ._posix import launch_caster, launch_detached  # noqa: F401 - re-exported
 
 
 def _xdg(var, default):
@@ -131,61 +129,6 @@ def firewall_allow_cmd(cidr, port):
 
 def supports_mpris():
     return True
-
-
-class _LinuxCasterHandle(CasterHandle):
-    """Terminates the whole process group (go-chromecast + any ffmpeg child)."""
-    def terminate(self):
-        p = self._p
-        if p.poll() is None:
-            for sig in (signal.SIGTERM, signal.SIGKILL):
-                try:
-                    os.killpg(os.getpgid(p.pid), sig)
-                    p.wait(timeout=3)
-                    break
-                except ProcessLookupError:
-                    break
-                except Exception:
-                    pass
-
-
-def launch_caster(args, env=None, log_path=None):
-    """go-chromecast keeps its in-process HTTP server alive only while it has a
-    controlling terminal, so launch it on a PTY (its own session), draining the
-    PTY to a log so the buffer never stalls it."""
-    master, slave = pty.openpty()
-    p = subprocess.Popen(args, stdin=slave, stdout=slave, stderr=slave,
-                         start_new_session=True, close_fds=True, env=env)
-    os.close(slave)
-
-    def _drain():
-        try:
-            with (open(log_path, "wb") if log_path else open(os.devnull, "wb")) as f:
-                while True:
-                    data = os.read(master, 4096)
-                    if not data:
-                        break
-                    f.write(data)
-                    f.flush()
-        except OSError:
-            pass
-        finally:
-            try:
-                os.close(master)
-            except OSError:
-                pass
-
-    threading.Thread(target=_drain, daemon=True).start()
-    return _LinuxCasterHandle(p)
-
-
-def launch_detached(args, log_path=None):
-    out = open(log_path, "wb") if log_path else subprocess.DEVNULL
-    p = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
-                         start_new_session=True)
-    if log_path:
-        out.close()
-    return p
 
 
 _HW_UNSET = object()

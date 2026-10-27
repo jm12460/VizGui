@@ -105,7 +105,7 @@ class VlcTarget(PlaybackTarget):
         self.mode = None           # "http" (we launched it) or "mpris" (manual VLC)
 
     def available(self):
-        if not platforms.has_tool("vlc"):
+        if not platforms.has_vlc():
             return False, "VLC isn't installed — can't use the VLC target."
         return True, ""
 
@@ -130,7 +130,7 @@ class VlcTarget(PlaybackTarget):
         # 3) No VLC -> launch our own (HTTP), stays open, native playlist.
         self.mode = "http"
         self.proc = platforms.launch_detached(
-            ["vlc", "--extraintf", "http", "--http-host", "127.0.0.1",
+            [platforms.vlc_exe(), "--extraintf", "http", "--http-host", "127.0.0.1",
              "--http-port", str(VLC_PORT), "--http-password", VLC_PW,
              "--no-random", "--no-loop", "--no-repeat", *items],
             log_path=CASTER_LOG)
