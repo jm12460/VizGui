@@ -10,8 +10,8 @@ def main():
     app.setStyleSheet(QSS)
     w = MainWindow()
     w.show()
-    if not config.CFG.get("sources"):
-        w.open_setup()   # first run with nothing configured
+    if config.FRESH_INSTALL:
+        w.open_setup()   # genuine first run: guide setup (the TV auto-appears)
     app.exec()
 
 

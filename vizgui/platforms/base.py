@@ -71,6 +71,16 @@ def firewall_allow_cmd(cidr, port):
     return None
 
 
+def default_media_dirs():
+    """Standard media folders to seed a fresh config with — only those that exist.
+    -> [(name, path)]. Platforms may override to honor OS 'known folders'."""
+    home = os.path.expanduser("~")
+    cands = [("Videos", os.path.join(home, "Videos")),
+             ("Music", os.path.join(home, "Music")),
+             ("Downloads", os.path.join(home, "Downloads"))]
+    return [(n, p) for n, p in cands if os.path.isdir(p)]
+
+
 def supports_mpris():
     """True if a manually-opened media player can be controlled over MPRIS/D-Bus."""
     return False

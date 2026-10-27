@@ -9,13 +9,17 @@ import os
 import secrets
 
 from .paths import CONFIG_DIR, CONFIG_PATH, log
+from . import platforms
 
 
 def _migrate_default():
-    """Build a clean first-run config: just a local VLC target. Media sources,
-    Cast devices and SmartCast TVs are all added through the setup wizard."""
+    """Build a clean first-run config so the app is useful immediately: the user's
+    standard media folders (those that exist) as sources, plus a local VLC target.
+    Cast devices and SmartCast TVs are discovered/added through the setup wizard."""
+    sources = [{"name": name, "path": path}
+               for name, path in platforms.default_media_dirs()]
     return {
-        "sources": [],
+        "sources": sources,
         "targets": [{"type": "vlc", "name": "VLC (this PC)"}],
         "web": {"enabled": True, "port": 8950},
         "auto_next": True,
@@ -45,7 +49,14 @@ def ensure_web_secrets(cfg):
     return changed
 
 
+# True when this launch created the config from scratch (no file existed) —
+# the app uses it to open the setup wizard on a genuine first run.
+FRESH_INSTALL = False
+
+
 def load_config():
+    global FRESH_INSTALL
+    FRESH_INSTALL = False
     try:
         with open(CONFIG_PATH) as f:
             cfg = json.load(f)
@@ -60,6 +71,7 @@ def load_config():
                 pass
         return cfg
     except Exception:
+        FRESH_INSTALL = True
         cfg = _migrate_default()
         ensure_web_secrets(cfg)
         try:

@@ -5,13 +5,24 @@ from unittest import mock
 from vizgui import config
 
 
-def test_migrate_default_is_clean():
-    cfg = config._migrate_default()
-    assert cfg["sources"] == []
+def test_migrate_default_seeds_media_dirs_and_vlc():
+    with mock.patch.object(config.platforms, "default_media_dirs",
+                           return_value=[("Videos", "/home/u/Videos"),
+                                         ("Music", "/home/u/Music")]):
+        cfg = config._migrate_default()
+    assert cfg["sources"] == [{"name": "Videos", "path": "/home/u/Videos"},
+                              {"name": "Music", "path": "/home/u/Music"}]
     assert any(t["type"] == "vlc" for t in cfg["targets"])
     assert not any(t.get("type") == "cast" for t in cfg["targets"])
     assert cfg["web"]["enabled"] is True
     assert cfg["auto_next"] is True
+
+
+def test_migrate_default_empty_when_no_media_dirs():
+    with mock.patch.object(config.platforms, "default_media_dirs", return_value=[]):
+        cfg = config._migrate_default()
+    assert cfg["sources"] == []
+    assert any(t["type"] == "vlc" for t in cfg["targets"])
 
 
 def test_ensure_web_secrets_adds_and_is_idempotent():
@@ -64,5 +75,16 @@ def test_load_config_missing_file_migrates():
         with mock.patch.object(config, "CONFIG_DIR", d), \
              mock.patch.object(config, "CONFIG_PATH", cfgpath):
             loaded = config.load_config()
+            assert config.FRESH_INSTALL is True   # genuine first run
     assert any(t["type"] == "vlc" for t in loaded["targets"])
     assert loaded["web"]["token"]
+
+
+def test_load_config_existing_file_not_fresh():
+    with tempfile.TemporaryDirectory() as d:
+        cfgpath = os.path.join(d, "config.json")
+        with mock.patch.object(config, "CONFIG_DIR", d), \
+             mock.patch.object(config, "CONFIG_PATH", cfgpath):
+            config.save_config({"sources": [], "targets": [], "web": {"port": 8950}})
+            config.load_config()
+            assert config.FRESH_INSTALL is False   # existing config -> no wizard

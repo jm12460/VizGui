@@ -15,6 +15,30 @@ def _xdg(var, default):
     return os.environ.get(var) or os.path.expanduser(default)
 
 
+def _xdg_user_dir(key, fallback):
+    """Resolve an XDG user dir (e.g. 'VIDEOS') from ~/.config/user-dirs.dirs,
+    falling back to ~/<fallback>."""
+    cfg = os.path.join(_xdg("XDG_CONFIG_HOME", "~/.config"), "user-dirs.dirs")
+    try:
+        with open(cfg) as f:
+            for line in f:
+                if line.startswith(f"XDG_{key}_DIR"):
+                    val = line.split("=", 1)[1].strip().strip('"')
+                    return val.replace("$HOME", os.path.expanduser("~"))
+    except Exception:
+        pass
+    return os.path.expanduser(f"~/{fallback}")
+
+
+def default_media_dirs():
+    out = []
+    for name, key in (("Videos", "VIDEOS"), ("Music", "MUSIC"), ("Downloads", "DOWNLOAD")):
+        p = _xdg_user_dir(key, name)
+        if os.path.isdir(p):
+            out.append((name, p))
+    return out
+
+
 def config_dir():
     return os.path.join(_xdg("XDG_CONFIG_HOME", "~/.config"), "vizgui")
 

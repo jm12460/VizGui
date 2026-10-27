@@ -142,3 +142,33 @@ def test_base_has_tool_via_fallback():
 def test_base_has_tool_missing():
     with mock.patch.object(base.shutil, "which", return_value=None):
         assert base.has_tool("definitely-not-a-tool", []) is False
+
+
+def test_base_default_media_dirs_only_existing():
+    with mock.patch.object(base.os.path, "isdir", lambda p: p.endswith("Videos")):
+        assert [n for n, _ in base.default_media_dirs()] == ["Videos"]
+
+
+def test_linux_xdg_user_dir_parses_file():
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "user-dirs.dirs"), "w") as f:
+            f.write('XDG_MUSIC_DIR="$HOME/stuff"\nXDG_VIDEOS_DIR="$HOME/Media/Vids"\n')
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": d}):
+            p = linux._xdg_user_dir("VIDEOS", "Videos")
+    assert p.endswith("/Media/Vids") and "$HOME" not in p
+
+
+def test_linux_xdg_user_dir_fallback_when_absent():
+    with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/no/such/dir"}):
+        assert linux._xdg_user_dir("VIDEOS", "Videos").endswith("/Videos")
+
+
+def test_linux_default_media_dirs_only_existing():
+    with mock.patch.object(linux, "_xdg_user_dir", lambda key, fb: f"/x/{fb}"), \
+         mock.patch.object(linux.os.path, "isdir", lambda p: p == "/x/Videos"):
+        assert linux.default_media_dirs() == [("Videos", "/x/Videos")]
+
+
+def test_base_default_media_dirs_contract_default():
+    # the contract default returns a list (whatever exists on the box)
+    assert isinstance(base.default_media_dirs(), list)

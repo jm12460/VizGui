@@ -69,14 +69,20 @@ makes manual testing untenable.
 
 The ease-of-use half. Mostly hardening what already exists.
 
-- [ ] **Auto-discover the TV** via mDNS in the wizard (reuse
-      `chromecast.scan_cast_devices`) so nobody types an IP.
-- [ ] **Every failure path graceful** — TV off, NAS down, bad SMB creds →
-      plain message, hard timeouts, never a hang or traceback.
-- [ ] **Zero-config defaults** so first launch is usable before opening Setup.
+- [x] **Auto-discover the TV** via mDNS in the wizard (background scan on open;
+      fresh setups auto-add found TVs; manual Scan no longer blocks the UI).
+- [x] **Every failure path graceful** — audited all network/IO calls; added
+      timeouts where missing, surfaced silent remote-key failures, matched the
+      firewall command to the running firewall (ufw/firewalld/none). SMB and
+      cast paths were already off-thread with clear messages.
+- [x] **Zero-config defaults** — fresh config seeds the user's Videos/Music/
+      Downloads (those that exist) via `platforms.default_media_dirs()`, so the
+      app opens with media to browse. Wizard auto-opens on a genuine first run
+      (tracked by `config.FRESH_INSTALL`), with the TV auto-appearing in it.
 - [ ] A **"test connection"** affordance in the wizard (TV reachable? share
-      mountable?).
+      mountable?). *(optional polish)*
 - [ ] Config **upgrade safety** — never corrupt an older config across versions.
+      *(basic: load backfills missing keys via setdefault)*
 
 **Risk:** low, high payoff. This is what makes a stranger keep the app.
 
