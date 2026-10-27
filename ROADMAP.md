@@ -60,8 +60,10 @@ makes manual testing untenable.
 - [x] A **release process**: push a `v*` tag → `release.yml` builds sdist/wheel
       and cuts a GitHub release (AUR & Flatpak can reference these tags).
 - [x] **`CHANGELOG.md`** (keep-a-changelog style).
-- [ ] Cut the first **`v0.1.0`** tag, then add a stable `vizgui` PKGBUILD built
-      from the release tarball (alongside `vizgui-git`).
+- [x] Cut the first **`v0.1.0`** tag (release workflow builds sdist/wheel + the
+      GitHub release).
+- [ ] Add a stable `vizgui` PKGBUILD built from the release tarball (alongside
+      `vizgui-git`).
 
 **Risk:** low.
 

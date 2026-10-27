@@ -13,15 +13,17 @@ first-run setup wizard. A single-user desktop app (PySide6/Qt).
 - **Plays anything on the TV:** H.264 mp4 is served directly; H.264 in mkv/etc. is
   live-**remuxed** (no re-encode); HEVC/x265 is **live-transcoded** to H.264
   (hardware-accelerated where available, software fallback otherwise).
-- **SmartCast remote:** power, input, volume, D-pad, menu/back/home + media
-  transport, all in one panel. Pairs with a Vizio-style SmartCast TV.
-- **Phone remote:** open a page on your phone's browser to browse/cast/control —
-  token-gated, paired by QR scan or a PIN (per-device, revocable).
+- **SmartCast remote:** power, input, a volume rocker, D-pad, menu/back/home +
+  media transport, all in one panel. Pairs with a SmartCast TV.
+- **Phone remote:** a mobile web page with a persistent now-playing/transport bar
+  over Remote and Browse tabs, plus a settings sheet (auto-next, Cast rescan,
+  source). Token-gated, paired by QR scan or a PIN (per-device, revocable).
 - **Media sources:** local folders, mounted drives, or SMB shares mounted on
   demand (no root, no manual mounting).
 - **Auto-play-next** through a folder, with Prev/Next skip.
-- **Setup wizard:** add sources, scan for Cast devices, pair a SmartCast TV,
-  configure the phone remote — no config files to edit by hand.
+- **Setup wizard:** tabbed (Sources / Cast & VLC / Phone Remote). Auto-discovers
+  your TV, seeds your media folders on first run, and shows the firewall command
+  matching your firewall — no config files to edit by hand.
 
 ## Install (CachyOS / Arch)
 
@@ -39,8 +41,8 @@ git clone https://github.com/jm12460/VizGui.git ~/Projects/vizgui
 bash ~/Projects/vizgui/install.sh
 ```
 
-Then launch **vizgui** from your app menu (or run `viz-gui`). First run opens the
-setup wizard — add a media source and scan for your TV.
+Then launch **vizgui** from your app menu (or run `viz-gui`). First run seeds your
+media folders and opens the setup wizard, which auto-discovers your TV.
 
 ### Dependencies (other distros)
 `python`, `PySide6`, `ffmpeg`, `vlc`, `playerctl`, `gvfs`/`gvfs-smb` (for SMB),
@@ -62,6 +64,7 @@ vizgui/
   paths.py          dirs, tool paths, logging
   health.py         startup "which required tools are missing" check
   platforms/        OS integration (base.py contract + linux.py)
+  playback/         playback-target contract + Cast / VLC adapters + media helpers
   smartcast.py      SmartCast TV keys, status, pairing
   chromecast.py     go-chromecast wrapper + device scan
   vlc.py            VLC control — HTTP (launched) + MPRIS (manual) backends
@@ -69,7 +72,7 @@ vizgui/
   sources.py        local folders + on-demand SMB mounts
   webremote.py      phone web server + JSON API (+ remote.html)
   net.py            LAN IP / subnet detection
-  helpers.py        time formatting, status parsing, cast planning
+  helpers.py        time formatting, status parsing, cast planning, discovery
   qtasync.py        run work off the UI thread, deliver back on the main thread
   ui/               Qt GUI: theme, dpad, remote, dialogs, mainwindow
 ```
@@ -80,12 +83,14 @@ Settings live in `~/.config/vizgui/config.json` (chmod 600); logs in `~/.cache/v
 pytest            # requires pytest (e.g. `sudo pacman -S python-pytest`)
 ```
 Pure-logic unit tests in `tests/` (no GUI/network/hardware): status & cast
-planning, config, VLC/MPRIS/Chromecast parsing, the transcode wrapper, web
-browsing, subnet detection, the platform layer, and the health check.
+planning, Cast-device discovery, config, the playback targets & media helpers,
+VLC/MPRIS/Chromecast parsing, the transcode wrapper, web browsing, subnet
+detection, the platform layer, and the health check.
 
-## Roadmap
+## Roadmap & releases
 Headed toward easy, out-of-the-box install on Linux (AUR/Flatpak) and, later,
-Windows and macOS. See [ROADMAP.md](ROADMAP.md).
+Windows and macOS. See [ROADMAP.md](ROADMAP.md) for the plan and
+[CHANGELOG.md](CHANGELOG.md) for what's shipped.
 
 ## License
 MIT — see [LICENSE](LICENSE).
