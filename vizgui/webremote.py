@@ -14,6 +14,7 @@ from PySide6.QtCore import QObject, Signal
 from . import config
 from .paths import VIDEO_GLOBS
 from .sources import source_path
+from .chromecast import scan_cast_devices
 
 with open(os.path.join(os.path.dirname(__file__), "remote.html"), encoding="utf-8") as _f:
     MOBILE_HTML = _f.read()
@@ -64,6 +65,8 @@ class _WebHandler(BaseHTTPRequestHandler):
         if u.path == "/api/browse":
             q = urllib.parse.parse_qs(u.query)
             return self._json(web_browse(int(q.get("src", ["0"])[0]), q.get("sub", [""])[0]))
+        if u.path == "/api/scan":
+            return self._json({"ok": True, "devices": scan_cast_devices()})
         return self._send(404, "not found", "text/plain")
 
     def do_POST(self):

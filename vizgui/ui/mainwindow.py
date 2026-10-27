@@ -481,6 +481,27 @@ class MainWindow(QMainWindow):
                     "dur": self._np_dur, "state": self._np_state, "live": self.now_live},
         }
 
+    def web_add_cast(self, dev):
+        """Add a Cast device discovered from the phone, then switch to it."""
+        addr = dev.get("addr")
+        if not addr:
+            return
+        targets = config.CFG.setdefault("targets", [])
+        if not any(t.get("type") == "cast" and t.get("addr") == addr for t in targets):
+            targets.append({"type": "cast", "name": dev.get("name") or addr,
+                            "addr": addr, "cast_port": dev.get("cast_port") or "8009"})
+            try:
+                save_config(config.CFG)
+            except Exception as e:
+                log.warning("save after web add-cast failed: %s", e)
+            self._reload_targets()
+        for i in range(self.target_box.count()):
+            t = self.target_box.itemData(i)
+            if t and t.get("type") == "cast" and t.get("addr") == addr:
+                self.target_box.setCurrentIndex(i)
+                break
+        self._status(f"Added {dev.get('name') or addr}")
+
     def _web_do(self, kind, p):
         """Apply a phone action on the main thread."""
         try:
@@ -499,6 +520,8 @@ class MainWindow(QMainWindow):
                         self._transport(fn)
             elif kind == "target":
                 self.target_box.setCurrentIndex(int(p["index"]))
+            elif kind == "addcast":
+                self.web_add_cast(p)
             elif kind == "autonext":
                 self.autonext_cb.setChecked(bool(p.get("on")))
             elif kind == "cast":

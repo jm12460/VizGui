@@ -6,24 +6,35 @@
 :root{--bg:#0d0f13;--card:#171a20;--btn:#232832;--btn2:#1b2029;--bd:#2a313c;--txt:#e9ebef;--dim:#8b929e;--ac:#3f7bff;--red:#e5484d}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 body{margin:0;background:var(--bg);color:var(--txt);padding-bottom:72px}
-header{padding:14px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;background:var(--bg);z-index:5}
-header .t{font-weight:800;font-size:17px;flex:1}
 select,button{color:var(--txt);background:var(--btn);border:1px solid var(--bd);border-radius:11px;font-size:15px}
 select{padding:9px 10px}
+button:active{background:#313a48}
+button.ac{background:var(--ac);border-color:#5a8dff;color:#fff;font-weight:700}
+/* sticky top: header + now-playing/transport bar */
+#topbar{position:sticky;top:0;z-index:6;background:var(--bg);box-shadow:0 1px 0 #20262f}
+header{padding:12px 16px 6px;display:flex;align-items:center;gap:10px}
+header .t{font-weight:800;font-size:17px}
+#target{flex:1;min-width:0}
+#gear{width:44px;flex:none;font-size:17px;padding:9px 0}
+#npbar{padding:2px 16px 12px}
+.np-top{display:flex;align-items:center}
+.np-title{font-size:15px;font-weight:600;word-break:break-word;flex:1}
+.badge{display:none;background:var(--red);color:#fff;font-size:10px;font-weight:800;border-radius:6px;padding:2px 7px;margin-left:8px}
+.bar{height:6px;background:#0f1217;border-radius:3px;margin:8px 0 3px;overflow:hidden}
+.bar>i{display:block;height:100%;width:0;background:var(--ac);border-radius:3px}
+.time{color:var(--dim);font-size:12px;text-align:right;min-height:14px}
+.trow{display:flex;gap:8px;margin-top:8px}
+.trow>button{flex:1;padding:12px 4px;font-size:18px}
+/* views */
 .view{display:none;padding:0 16px}
 .view.on{display:block}
 .card{background:var(--card);border:1px solid #242a33;border-radius:16px;padding:16px;margin:0 0 14px}
-.np-title{font-size:16px;font-weight:600;word-break:break-word}
-.badge{display:none;background:var(--red);color:#fff;font-size:11px;font-weight:800;border-radius:6px;padding:3px 8px;margin-left:8px}
-.bar{height:8px;background:#0f1217;border-radius:4px;margin:12px 0 6px;overflow:hidden}
-.bar>i{display:block;height:100%;width:0;background:var(--ac);border-radius:4px}
-.time{color:var(--dim);font-size:13px;text-align:right}
-.row{display:flex;gap:10px;margin-top:12px}
-.row>button{flex:1;padding:16px 8px;font-size:15px}
-button:active{background:#313a48}
-button.ac{background:var(--ac);border-color:#5a8dff;color:#fff;font-weight:700}
 .sect{color:#7f8794;font-weight:800;font-size:12px;margin:4px 2px 10px}
-/* dpad */
+.msg{color:var(--dim);font-size:13px;padding:8px 2px}
+/* remote keypad */
+.pwrow{display:flex;gap:10px;margin-bottom:12px}
+.pw{flex:1;padding:15px;font-size:15px}
+.pw.power{background:var(--red);border-color:#f05b60;color:#fff;max-width:64px;font-size:18px}
 .dpad{position:relative;width:230px;height:230px;margin:6px auto 8px}
 .dpad button{position:absolute;background:var(--btn2);border:1px solid var(--bd)}
 .dpad .ring{width:230px;height:230px;border-radius:50%;left:0;top:0;font-size:0}
@@ -31,10 +42,13 @@ button.ac{background:var(--ac);border-color:#5a8dff;color:#fff;font-weight:700}
 .dpad .ar{background:transparent;border:0;color:#c7ccd4;font-size:22px;width:60px;height:60px}
 .dpad .up{left:85px;top:6px}.dpad .dn{left:85px;bottom:6px}.dpad .lf{left:6px;top:85px}.dpad .rt{right:6px;top:85px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
-.grid button,.pw{padding:15px;font-size:15px}
-.pwrow{display:flex;gap:10px;margin-bottom:12px}
-.pw{flex:1}
-.pw.power{background:var(--red);border-color:#f05b60;color:#fff;max-width:64px;font-size:18px}
+.grid button{padding:15px;font-size:15px}
+/* volume rocker + mute/info (joined columns, matches desktop) */
+.volrow{display:flex;gap:10px;margin-top:10px}
+.rocker{flex:1;display:flex;flex-direction:column}
+.rocker button{padding:15px;font-size:15px;border-radius:0}
+.rocker button:first-child{border-radius:11px 11px 0 0}
+.rocker button:last-child{border-radius:0 0 11px 11px;border-top:0}
 /* browse */
 .crumb{color:var(--dim);font-size:13px;margin:0 2px 10px;word-break:break-all}
 .list button{display:flex;width:100%;align-items:center;gap:10px;text-align:left;padding:14px 12px;margin-bottom:8px;font-size:15px}
@@ -44,35 +58,50 @@ nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#10131a;borde
 nav button{flex:1;border:0;border-radius:0;background:transparent;color:var(--dim);padding:12px 0;font-size:12px;font-weight:700}
 nav button.on{color:var(--ac)}
 nav .ico{display:block;font-size:19px;margin-bottom:2px}
-.msg{color:var(--dim);font-size:13px;padding:8px 2px}
-#login{position:fixed;inset:0;background:var(--bg);z-index:20;display:none;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
-#login.on{display:flex}
-#login h2{font-size:20px;margin:0 0 6px}
+/* overlays (login + settings) */
+.overlay{position:fixed;inset:0;background:var(--bg);z-index:20;display:none;flex-direction:column;padding:22px;overflow-y:auto}
+.overlay.on{display:flex}
+.overlay h2{font-size:20px;margin:0 0 14px}
+#login{align-items:center;justify-content:center;text-align:center}
 #login p{color:var(--dim);margin:0 0 20px;max-width:300px}
 #login input{font-size:28px;letter-spacing:8px;text-align:center;width:200px;padding:12px;border-radius:12px;background:var(--card);border:1px solid var(--bd);color:var(--txt)}
 #login button{margin-top:16px;padding:14px 28px;font-size:16px}
 #pinmsg{color:var(--red);min-height:18px;margin-top:10px;font-size:14px}
+.set-row{margin:0 0 20px}
+.set-row>button,.set-row>select{width:100%;padding:13px}
+#anbtn.ac{background:var(--ac);border-color:#5a8dff;color:#fff}
+#devs button{display:block;width:100%;text-align:left;padding:13px;margin-top:8px}
+#setclose{margin-top:6px;padding:14px}
 </style></head><body>
-<div id="login"><h2>Pair this phone</h2><p>Scan the QR, or enter the pairing PIN — both are in ⚙ Setup → Phone remote in the viz app.</p>
- <input id="pinin" type="tel" inputmode="numeric" maxlength="6" placeholder="------">
- <button class="ac" onclick="pair()">Connect</button><div id="pinmsg"></div></div>
-<header><div class="t">viz remote</div>
-<select id="target" onchange="setTarget(this.value)"></select></header>
 
-<div id="v-play" class="view on">
- <div class="card">
-  <div style="display:flex;align-items:center"><div class="sect" style="margin:0">NOW PLAYING</div><span id="badge" class="badge">● LIVE</span></div>
-  <div id="np" class="np-title" style="margin-top:8px">Nothing playing.</div>
+<div id="login" class="overlay"><div style="margin:auto;text-align:center">
+ <h2>Pair this phone</h2>
+ <p>Scan the QR, or enter the pairing PIN — both are in ⚙ Setup → Phone remote in the viz app.</p>
+ <input id="pinin" type="tel" inputmode="numeric" maxlength="6" placeholder="------">
+ <div><button class="ac" onclick="pair()">Connect</button></div><div id="pinmsg"></div>
+</div></div>
+
+<div id="topbar">
+ <header><div class="t">viz remote</div>
+  <select id="target" onchange="setTarget(this.value)"></select>
+  <button id="gear" onclick="openSettings()" title="Settings">⚙</button>
+ </header>
+ <div id="npbar">
+  <div class="np-top"><div id="np" class="np-title">Nothing playing.</div><span id="badge" class="badge">● LIVE</span></div>
   <div class="bar"><i id="prog"></i></div>
   <div id="time" class="time"></div>
-  <div class="row"><button onclick="tr('prev')">⏮ Prev</button><button class="ac" onclick="tr('playpause')">⏯ Play/Pause</button><button onclick="tr('next')">Next ⏭</button></div>
-  <div class="row"><button onclick="tr('rewind')">⏪ 30s</button><button onclick="tr('stop')">⏹ Stop</button><button onclick="tr('forward')">30s ⏩</button></div>
-  <div class="row"><button id="an" onclick="toggleAN()">Auto-next: …</button></div>
+  <div class="trow">
+   <button onclick="tr('prev')" title="Previous">⏮</button>
+   <button class="ac" onclick="tr('playpause')" title="Play / Pause">⏯</button>
+   <button onclick="tr('next')" title="Next">⏭</button>
+   <button onclick="tr('rewind')" title="Back 30s">⏪</button>
+   <button onclick="tr('stop')" title="Stop">⏹</button>
+   <button onclick="tr('forward')" title="Forward 30s">⏩</button>
+  </div>
  </div>
- <div id="tv" class="msg"></div>
 </div>
 
-<div id="v-remote" class="view">
+<div id="v-remote" class="view on">
  <div class="card">
   <div class="pwrow"><button class="pw power" onclick="key('power')">⏻</button><button class="pw" onclick="key('input')">Input</button></div>
   <div class="dpad">
@@ -86,10 +115,13 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
   <div class="grid">
    <button onclick="key('back')">Back</button><button onclick="key('home')">Home</button>
    <button onclick="key('menu')">Menu</button><button onclick="key('exit')">Exit</button>
-   <button onclick="key('voldown')">Vol −</button><button onclick="key('volup')">Vol +</button>
-   <button onclick="key('mute')">Mute</button><button onclick="key('info')">Info</button>
+  </div>
+  <div class="volrow">
+   <div class="rocker"><button onclick="key('volup')">Vol +</button><button onclick="key('voldown')">Vol −</button></div>
+   <div class="rocker"><button onclick="key('mute')">Mute</button><button onclick="key('info')">Info</button></div>
   </div>
  </div>
+ <div id="tv" class="msg"></div>
 </div>
 
 <div id="v-browse" class="view">
@@ -101,57 +133,80 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
  </div>
 </div>
 
+<div id="settings" class="overlay">
+ <h2>Settings</h2>
+ <div class="set-row"><div class="sect">AUTO-PLAY NEXT</div>
+  <button id="anbtn" onclick="toggleAN()">Auto-next: …</button></div>
+ <div class="set-row"><div class="sect">CAST DEVICE</div>
+  <button onclick="scanCast()">🔍 Rescan for TVs</button>
+  <div id="devs"></div></div>
+ <div class="set-row"><div class="sect">MEDIA SOURCE (for Browse)</div>
+  <select id="setsrc" onchange="pickSource(this.value)"></select></div>
+ <button id="setclose" onclick="closeSettings()">Done</button>
+</div>
+
 <nav>
- <button id="t-play" class="on" onclick="tab('play')"><span class="ico">▶</span>Playing</button>
- <button id="t-remote" onclick="tab('remote')"><span class="ico">⊕</span>Remote</button>
+ <button id="t-remote" class="on" onclick="tab('remote')"><span class="ico">⊕</span>Remote</button>
  <button id="t-browse" onclick="tab('browse')"><span class="ico">≣</span>Browse</button>
 </nav>
 
 <script>
-let curSrc=0, curSub="";
+let curSrc=0, curSub="", anState=true, lastTargets=null, lastSources=null;
 if(location.hash.indexOf('t=')>=0){try{localStorage.setItem('viztoken',decodeURIComponent(location.hash.split('t=')[1]));history.replaceState(null,'',location.pathname);}catch(e){}}
 let TOKEN=localStorage.getItem('viztoken')||'';
-function showLogin(){document.getElementById('login').classList.add('on');}
-function hideLogin(){document.getElementById('login').classList.remove('on');}
+function $(id){return document.getElementById(id);}
+function showLogin(){$('login').classList.add('on');}
+function hideLogin(){$('login').classList.remove('on');}
 async function api(p,o){o=o||{};o.headers=Object.assign({'X-Viz-Token':TOKEN},o.headers||{});
  try{const r=await fetch(p,o);if(r.status===401){showLogin();return{__401:true};}return await r.json();}catch(e){return{};}}
 function cmd(b){return api('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});}
-async function pair(){const pin=document.getElementById('pinin').value;
+async function pair(){const pin=$('pinin').value;
  const r=await fetch('/api/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
  const d=await r.json().catch(_=>({}));
- if(d.ok){TOKEN=d.token;localStorage.setItem('viztoken',TOKEN);document.getElementById('pinmsg').textContent='';hideLogin();poll();}
- else document.getElementById('pinmsg').textContent=d.locked?'Too many tries — tap New PIN in the app.':'Wrong PIN.';}
+ if(d.ok){TOKEN=d.token;localStorage.setItem('viztoken',TOKEN);$('pinmsg').textContent='';hideLogin();poll();}
+ else $('pinmsg').textContent=d.locked?'Too many tries — tap New PIN & QR in the app.':'Wrong PIN.';}
 function key(c){cmd({kind:'key',cmd:c});}
 function tr(a){cmd({kind:'transport',action:a});}
 function setTarget(i){cmd({kind:'target',index:+i});}
-function tab(n){for(const v of ['play','remote','browse']){document.getElementById('v-'+v).classList.toggle('on',v===n);document.getElementById('t-'+v).classList.toggle('on',v===n);}if(n==='browse')loadSources();}
+function tab(n){for(const v of ['remote','browse']){$('v-'+v).classList.toggle('on',v===n);$('t-'+v).classList.toggle('on',v===n);}if(n==='browse')loadSources();}
 function fmt(s){s=Math.max(0,s|0);let h=s/3600|0,m=(s%3600)/60|0,x=s%60;return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0');}
-let last=null;
 async function poll(){const d=await api('/api/status');if(!d.ok)return;
- const tsel=document.getElementById('target');
- if(JSON.stringify(d.targets)!==last){last=JSON.stringify(d.targets);tsel.innerHTML=d.targets.map(t=>`<option value="${t.i}">${t.name}</option>`).join('');}
+ const tsel=$('target'),ts=JSON.stringify(d.targets);
+ if(ts!==lastTargets){lastTargets=ts;tsel.innerHTML=d.targets.map(t=>`<option value="${t.i}">${t.name}</option>`).join('');}
  tsel.value=d.target_index;
  const n=d.now||{};
- document.getElementById('np').textContent=n.title||'Nothing playing.';
- document.getElementById('badge').style.display=n.live?'inline-block':'none';
- const prog=document.getElementById('prog'),tm=document.getElementById('time');
+ $('np').textContent=n.title||'Nothing playing.';
+ $('badge').style.display=n.live?'inline-block':'none';
+ const prog=$('prog'),tm=$('time');
  if(n.live){prog.style.width='100%';tm.textContent=fmt(n.pos)+'  ·  live';}
  else if(n.dur>0){prog.style.width=(100*Math.min(n.pos,n.dur)/n.dur)+'%';tm.textContent=fmt(n.pos)+' / '+fmt(n.dur)+(n.state&&n.state!=='PLAYING'?'  ·  '+n.state.toLowerCase():'');}
  else{prog.style.width='0';tm.textContent=n.state?n.state.toLowerCase():'';}
- document.getElementById('tv').textContent=d.tv||'';
- anState=!!d.auto_next;const an=document.getElementById('an');an.textContent='Auto-next: '+(anState?'on':'off');an.classList.toggle('ac',anState);
+ $('tv').textContent=d.tv||'';
+ anState=!!d.auto_next;const an=$('anbtn');an.textContent='Auto-next: '+(anState?'on':'off');an.classList.toggle('ac',anState);
+ lastSources=JSON.stringify(d.sources||[]);
 }
-let anState=true;
-function toggleAN(){anState=!anState;cmd({kind:'autonext',on:anState});}
-async function loadSources(){const d=await api('/api/status');const s=document.getElementById('source');
+function toggleAN(){anState=!anState;cmd({kind:'autonext',on:anState});const an=$('anbtn');an.textContent='Auto-next: '+(anState?'on':'off');an.classList.toggle('ac',anState);}
+/* ---- settings ---- */
+async function openSettings(){const d=await api('/api/status');if(d.__401)return;
+ const s=$('setsrc');s.innerHTML=(d.sources||[]).map(x=>`<option value="${x.i}">${x.name}</option>`).join('');s.value=curSrc;
+ $('devs').innerHTML='';$('settings').classList.add('on');}
+function closeSettings(){$('settings').classList.remove('on');}
+async function scanCast(){const box=$('devs');box.innerHTML='<div class="msg">Scanning…</div>';
+ const d=await api('/api/scan');const devs=(d&&d.devices)||[];
+ if(!devs.length){box.innerHTML='<div class="msg">No TVs found. Make sure it\'s on and on the same Wi-Fi.</div>';return;}
+ box.innerHTML=devs.map(v=>`<button onclick='addCast(${JSON.stringify(v).replace(/'/g,"&#39;")})'>📺 ${v.name} (${v.addr})</button>`).join('');}
+async function addCast(v){await cmd({kind:'addcast',name:v.name,addr:v.addr,cast_port:v.cast_port});setTimeout(poll,300);closeSettings();}
+function pickSource(i){curSrc=+i;curSub="";closeSettings();tab('browse');}
+/* ---- browse ---- */
+async function loadSources(){const d=await api('/api/status');const s=$('source');
  s.innerHTML=(d.sources||[]).map(x=>`<option value="${x.i}">${x.name}</option>`).join('');
- if((d.sources||[]).length){s.value=curSrc;browse(curSrc,curSub);}else{document.getElementById('bmsg').textContent='No sources configured.';}
+ if((d.sources||[]).length){s.value=curSrc;browse(curSrc,curSub);}else{$('bmsg').textContent='No sources configured.';$('list').innerHTML='';}
 }
 async function browse(src,sub){curSrc=+src;curSub=sub;
  const d=await api('/api/browse?src='+src+'&sub='+encodeURIComponent(sub));
- const list=document.getElementById('list'),msg=document.getElementById('bmsg');msg.textContent='';
+ const list=$('list'),msg=$('bmsg');msg.textContent='';
  if(!d.ok){list.innerHTML='';msg.textContent=d.error||'Could not open source.';return;}
- document.getElementById('crumb').textContent='/'+(sub||'');
+ $('crumb').textContent='/'+(sub||'');
  let h='';
  if(d.up!==null)h+=`<button onclick="browse(${src},'${d.up.replace(/'/g,"\\'")}')"><span class="ic">↩</span> ..</button>`;
  for(const e of d.entries){const r=e.rel.replace(/'/g,"\\'");
@@ -159,7 +214,7 @@ async function browse(src,sub){curSrc=+src;curSub=sub;
   else h+=`<button onclick="castFile('${e.path.replace(/'/g,"\\'")}','${e.name.replace(/'/g,"\\'")}')"><span class="ic">🎬</span> ${e.name}</button>`;}
  list.innerHTML=h||'<div class="msg">Empty.</div>';
 }
-async function castFile(path,name){const b=document.getElementById('bmsg');b.textContent='Casting '+name+'…';
- await cmd({kind:'cast',path:path});setTimeout(()=>{tab('play');},400);}
+async function castFile(path,name){const b=$('bmsg');b.textContent='Casting '+name+'…';
+ await cmd({kind:'cast',path:path});setTimeout(poll,400);}
 poll();setInterval(poll,1500);
 </script></body></html>
