@@ -110,3 +110,21 @@ def test_linux_launch_detached_runs_and_terminates():
         p.terminate()
         p.wait(timeout=3)
     assert p.poll() is not None
+
+
+def test_base_has_tool_on_path():
+    with mock.patch.object(base.shutil, "which", return_value="/usr/bin/x"):
+        assert base.has_tool("x") is True
+
+
+def test_base_has_tool_via_fallback():
+    with tempfile.TemporaryDirectory() as d:
+        f = os.path.join(d, "t")
+        open(f, "w").close()
+        with mock.patch.object(base.shutil, "which", return_value=None):
+            assert base.has_tool("t", [f]) is True
+
+
+def test_base_has_tool_missing():
+    with mock.patch.object(base.shutil, "which", return_value=None):
+        assert base.has_tool("definitely-not-a-tool", []) is False

@@ -43,6 +43,13 @@ def find_tool(name, fallbacks=()):
     return name
 
 
+def has_tool(name, fallbacks=()):
+    """True if an external executable is available (on PATH or a fallback path)."""
+    if shutil.which(name):
+        return True
+    return any(os.path.isfile(os.path.expanduser(f)) for f in fallbacks)
+
+
 def mount_share(server, share, user="", domain="", password="", guest=False, timeout=30):
     """Mount an SMB share and return a local path. Overridden per-OS."""
     raise NotImplementedError("Mounting SMB shares is not supported on this platform")

@@ -69,4 +69,6 @@ QScrollBar::handle:horizontal { background: #2d343f; border-radius: 5px; min-wid
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 QSplitter::handle { background: transparent; }
+QStatusBar { background: #0f1217; color: #9aa0aa; border-top: 1px solid #242a33; }
+QStatusBar::item { border: none; }
 """

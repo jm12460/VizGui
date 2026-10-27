@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from .. import config
 from .. import platforms
+from .. import health
 from ..config import save_config, load_config
 from ..paths import GC, CACHE, VIDEO_GLOBS, CASTER_LOG, log
 from ..transcode import HAS_HW, write_wrapper
@@ -173,7 +174,25 @@ class MainWindow(QMainWindow):
         self._refresh_remote_enabled()
         _ct = self.target_box.currentData()
         self.remote.set_target_label((_ct or {}).get("name") or self.target)
+        self.statusBar().showMessage("Ready", 3000)
+        self._health_check()
         self.poll_tv(); self.poll_cast()
+
+    # ---- status surface + startup health ----
+    def _status(self, msg, timeout=6000):
+        self.statusBar().showMessage(msg, timeout)
+
+    def _health_check(self):
+        miss = health.missing(config.CFG)
+        if miss:
+            names = ", ".join(m[0] for m in miss)
+            self._status(f"⚠ Missing: {names} — hover for details", 0)
+            detail = "Some tools aren't installed:\n" + \
+                     "\n".join(f"  • {t} — {why}" for t, why in miss)
+            self.statusBar().setToolTip(detail)
+            log.warning("health: missing tools: %s", miss)
+        else:
+            self.statusBar().setToolTip("")
 
     # ---- media actions ----
     def _sel_path(self):
@@ -232,9 +251,12 @@ class MainWindow(QMainWindow):
         if s.get("kind") == "smb":
             self.tree.setRootIndex(QModelIndex())   # clear while connecting
             name = s.get("name") or s.get("smb", {}).get("share", "share")
+            self._status(f"Connecting to {name}…", 0)
             def done(res):
                 if isinstance(res, str) and self._root_at(res):
+                    self._status(f"Connected to {name}", 4000)
                     return
+                self._status(f"Couldn't open '{name}': {res}")
                 QMessageBox.warning(self, "SMB", f"Could not open '{name}':\n{res}")
             run_async(lambda: self._safe_source_path(s), done)
         else:
@@ -325,6 +347,10 @@ class MainWindow(QMainWindow):
         """Play a file/URL in VLC on this machine, with its HTTP control iface
         enabled so our transport + Now Playing drive it. VLC handles every codec
         and plays smb://, nfs://, http:// URLs directly - no transcode/serve."""
+        if not platforms.has_tool("vlc"):
+            self.np_title.setText("VLC is not installed.")
+            self._status("VLC isn't installed — can't use the VLC target.")
+            return
         self.now_title = os.path.basename(path.rstrip("/")) or path
         self.now_live = False
         self._casting = True
@@ -386,6 +412,7 @@ class MainWindow(QMainWindow):
             self.b_cast.setEnabled(True)
             if res != "playing":
                 self.np_title.setText(str(res))
+                self._status(f"Cast failed: {res}")
             self.poll_cast()
         run_async(do, done)
 
@@ -451,6 +478,10 @@ class MainWindow(QMainWindow):
         if self.target == "vlc":
             self._cast_vlc(path)
             return
+        if not platforms.has_tool("go-chromecast", health.GC_FALLBACKS):
+            self.np_title.setText("go-chromecast is not installed.")
+            self._status("go-chromecast isn't installed — can't cast to the TV.")
+            return
         self.now_title = os.path.basename(path)   # real name, for the display
         vcodec = self._vcodec(path)               # quick probe to choose the path
         ext = os.path.splitext(path)[1]
@@ -458,6 +489,10 @@ class MainWindow(QMainWindow):
         direct = plan == "direct"                 # serve as-is, no ffmpeg
         copy_video = plan == "remux"              # near-free container copy (H.264 mkv)
         live = not direct
+        if live and not platforms.has_tool("ffmpeg"):
+            self.np_title.setText("ffmpeg is not installed.")
+            self._status("ffmpeg isn't installed — can't transcode/remux this file.")
+            return
         self.now_live = live
         self._casting = True                       # guard polls from clearing state
         self._np_pos = 0; self._np_playing = False
@@ -501,8 +536,10 @@ class MainWindow(QMainWindow):
             self.b_cast.setEnabled(True)
             if isinstance(res, dict) and "error" in res:
                 self.np_title.setText("error: " + res["error"])
+                self._status("VLC error: " + res["error"])
             elif res != "playing":
                 self.np_title.setText(str(res))
+                self._status(str(res))
             # else: the status poll fills in title/progress
             self.poll_cast()
         run_async(do, done)
