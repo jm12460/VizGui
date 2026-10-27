@@ -29,24 +29,32 @@ def fmt_time(s):
 def discovery_plan(devs, targets):
     """Decide what a Cast scan should do, given its results and the current targets.
     Pure (no UI): returns (to_add, status_message).
-      - fresh setup (no Cast target yet): auto-add everything found
-      - otherwise: don't auto-add; just report what else is on the network
+
+    Only the unambiguous case auto-adds — a fresh setup where exactly one device
+    is on the network. With several devices we never presume; we list them and
+    let the user pick (via Scan), so nobody with many TVs gets them all dumped in.
+    Adding a target only lists it as a possible destination; it never connects to
+    or commands the device.
     """
     if not isinstance(devs, list):
         devs = []   # run_async wraps a failed scan as an error dict
     cast_addrs = {t.get("addr") for t in targets if t.get("type") == "cast"}
     new = [d for d in devs if d.get("addr") not in cast_addrs]
-    if new and not cast_addrs:
-        names = ", ".join(d["name"] for d in new)
-        return new, (f"✓ Found and added: {names}. Select it and “Pair SmartCast…” "
-                     "to enable the remote.")
-    if new:
+    if not new:
+        if devs:
+            return [], ""   # everything found is already a target
+        return [], ("No Cast devices found yet. Make sure the TV is on and on the same "
+                    "Wi-Fi, then click “Scan for Cast devices”.")
+    if cast_addrs:
         names = ", ".join(f"{d['name']} ({d['addr']})" for d in new)
         return [], f"Also on your network: {names} — use “Scan for Cast devices” to add."
-    if devs:
-        return [], ""   # everything found is already a target
-    return [], ("No Cast devices found yet. Make sure the TV is on and on the same Wi-Fi, "
-                "then click “Scan for Cast devices”.")
+    if len(new) == 1:
+        d = new[0]
+        return [d], (f"✓ Found your TV: {d['name']}. Select it and “Pair SmartCast…” "
+                     "to enable the remote.")
+    names = ", ".join(d["name"] for d in new)
+    return [], (f"Found {len(new)} Cast devices ({names}). Click “Scan for Cast devices” "
+                "to add the one you want.")
 
 
 def parse_status(line):

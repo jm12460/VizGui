@@ -52,10 +52,17 @@ def test_parse_status_idle():
 _TV = {"name": "Living Room", "addr": "10.0.0.105", "cast_port": "8009"}
 
 
-def test_discovery_fresh_autoadds_everything():
+def test_discovery_single_device_autoadds():
     to_add, msg = discovery_plan([_TV], [])
     assert to_add == [_TV]
-    assert "Found and added" in msg
+    assert "Found your TV" in msg
+
+
+def test_discovery_multiple_devices_does_not_autoadd():
+    tv2 = {"name": "Bedroom", "addr": "10.0.0.106", "cast_port": "8009"}
+    to_add, msg = discovery_plan([_TV, tv2], [])
+    assert to_add == []                    # never dump multiple devices in
+    assert "Found 2 Cast devices" in msg
 
 
 def test_discovery_does_not_autoadd_when_a_cast_target_exists():
