@@ -10,7 +10,7 @@ from .paths import WRAPPER
 HAS_HW = platforms.hw_encode_args() is not None
 
 
-def write_wrapper(path, copy_video=False):
+def write_wrapper(path, copy_video=False, start=0):
     """Write the helper go-chromecast runs for live streaming. The source path is
     embedded (shell-quoted, so spaces/+/() are safe) and the helper streams the
     video + stereo AAC as fragmented mp4 to stdout. Returns the script path
@@ -21,14 +21,15 @@ def write_wrapper(path, copy_video=False):
     can't serve directly (e.g. mkv). Otherwise re-encode to H.264 using the
     platform's hardware encoder, or software libx264 as a fallback."""
     q = shlex.quote(os.path.abspath(path))
+    ss = f"-ss {int(start)} " if start else ""   # input seek, for resume
     if copy_video:
-        vin, venc = f"-i {q}", "-c:v copy"
+        vin, venc = f"{ss}-i {q}", "-c:v copy"
     else:
         hw = platforms.hw_encode_args()
         if hw:
-            vin, venc = f"{hw[0]} -i {q}", hw[1]
+            vin, venc = f"{hw[0]} {ss}-i {q}", hw[1]
         else:
-            vin = f"-i {q}"
+            vin = f"{ss}-i {q}"
             venc = ("-c:v libx264 -preset veryfast -tune zerolatency -crf 23 "
                     "-maxrate 10M -bufsize 20M -g 48 -bf 0")
     text = ("#!/usr/bin/env bash\n"

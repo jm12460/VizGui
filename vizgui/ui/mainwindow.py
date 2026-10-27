@@ -2,17 +2,19 @@
 remote, and status together."""
 import os
 import secrets
+import time
 from PySide6.QtCore import Qt, QTimer, QDir, QModelIndex
 from PySide6.QtGui import QPixmap, QImage, QPainter, QColor
 from PySide6.QtWidgets import (
     QWidget, QMainWindow, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
     QFrame, QTreeView, QSplitter, QSizePolicy, QFileSystemModel, QProgressBar, QComboBox,
-    QDialog, QDialogButtonBox, QMessageBox, QCheckBox,
+    QDialog, QDialogButtonBox, QMessageBox, QCheckBox, QListWidget, QListWidgetItem,
 )
 
 from .. import config
 from .. import platforms
 from .. import health
+from .. import history
 from ..config import save_config, load_config
 from ..paths import VIDEO_GLOBS, log
 from ..smartcast import sc_status
@@ -71,6 +73,8 @@ class MainWindow(QMainWindow):
         self._user_stopped = False  # True when the user hit Stop (suppresses auto-next)
         # last-known playback state, advanced locally once a second between polls
         self._np_pos = 0; self._np_dur = 0; self._np_state = ""; self._np_playing = False
+        self._resume_base = 0       # seconds a live stream was resumed from (pos is relative)
+        self._last_save = 0.0       # throttle history writes during playback
 
         root = QWidget(); self.setCentralWidget(root)
         outer = QHBoxLayout(root)
@@ -104,9 +108,13 @@ class MainWindow(QMainWindow):
             tag = "  (SMB)" if s.get("kind") == "smb" else ""
             self.source_box.addItem((s.get("name") or s.get("path", "?")) + tag, s)
         self.source_box.currentIndexChanged.connect(self._source_changed)
+        self.b_continue = QPushButton("▶ Continue")
+        self.b_continue.setToolTip("Resume something you were watching")
+        self.b_continue.clicked.connect(self.show_continue)
         self.b_setup = QPushButton("⚙ Setup"); self.b_setup.clicked.connect(self.open_setup)
         hdr.addWidget(t); hdr.addStretch(1)
         hdr.addWidget(QLabel("Source:")); hdr.addWidget(self.source_box)
+        hdr.addWidget(self.b_continue)
         hdr.addWidget(self.b_setup)
         bl.addLayout(hdr)
         self.model = QFileSystemModel()
@@ -222,12 +230,36 @@ class MainWindow(QMainWindow):
     def on_double(self, idx):
         p = self.model.filePath(idx)
         if os.path.isfile(p):
-            self._cast(p)
+            self._play(p)
+
+    def _play(self, path):
+        """Play a browsed file, offering to resume if we remember a position."""
+        r = history.resume_pos(path)
+        resume = 0
+        if r > 0:
+            box = QMessageBox(self)
+            box.setWindowTitle("Resume")
+            box.setText(f"Resume “{os.path.basename(path)}” from {fmt_time(r)}?")
+            rb = box.addButton("Resume", QMessageBox.AcceptRole)
+            box.addButton("Start over", QMessageBox.RejectRole)
+            box.exec()
+            if box.clickedButton() is rb:
+                resume = r
+        self._cast(path, resume)
+
+    def _remember(self):
+        """Record where the current file stopped, for continue-watching. For a live
+        stream the reported pos is relative to the resume point, so add the base."""
+        if self._now_path and self._np_dur > 0:
+            base = self._resume_base if self.now_live else 0
+            history.record(self._now_path, self._np_pos + base, self._np_dur,
+                           self.now_title or "")
+            self._last_save = time.time()
 
     def cast_selected(self):
         p = self._sel_path()
         if p:
-            self._cast(p)
+            self._play(p)
         else:
             self.np_title.setText("Select a video file first.")
 
@@ -309,6 +341,56 @@ class MainWindow(QMainWindow):
             self._reload_targets()
             self._target_changed(self.target_box.currentIndex())
 
+    def show_continue(self):
+        """Continue-watching list: resume on the current target, forget, or clear."""
+        items = history.recent()
+        dlg = QDialog(self); dlg.setWindowTitle("Continue watching"); dlg.resize(460, 420)
+        lay = QVBoxLayout(dlg)
+        lst = QListWidget()
+        for it in items:
+            dur = it.get("dur", 0)
+            when = f"     {fmt_time(it.get('pos', 0))} / {fmt_time(dur)}" if dur else ""
+            w = QListWidgetItem(f"{it.get('title', '?')}{when}")
+            w.setData(Qt.UserRole, it)
+            lst.addItem(w)
+        if items:
+            lay.addWidget(lst, 1)
+        else:
+            lay.addWidget(QLabel("Nothing to continue yet — play something and it'll appear here."))
+
+        def resume():
+            w = lst.currentItem()
+            if w:
+                d = w.data(Qt.UserRole)
+                dlg.accept()
+                self._cast(d["path"], int(d.get("pos", 0)))
+
+        def forget():
+            w = lst.currentItem()
+            if w:
+                history.forget(w.data(Qt.UserRole)["path"])
+                lst.takeItem(lst.row(w))
+
+        def clear():
+            if QMessageBox.question(dlg, "Clear history",
+                    "Forget everything in Continue watching?") == QMessageBox.Yes:
+                history.clear()
+                dlg.accept()
+
+        lst.itemDoubleClicked.connect(lambda _w: resume())
+        row = QHBoxLayout()
+        if items:
+            b_resume = QPushButton("Resume"); b_resume.setProperty("class", "accent")
+            b_resume.clicked.connect(resume)
+            b_forget = QPushButton("Forget"); b_forget.clicked.connect(forget)
+            row.addWidget(b_resume); row.addWidget(b_forget)
+        b_clear = QPushButton("Clear all"); b_clear.clicked.connect(clear)
+        row.addStretch(1); row.addWidget(b_clear)
+        lay.addLayout(row)
+        bb = QDialogButtonBox(QDialogButtonBox.Close); bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        dlg.exec()
+
     def go_next(self):
         if self.active.native_skip():
             run_async(lambda: self.active.skip(1), lambda _: self.poll_cast())
@@ -333,8 +415,11 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _cast(self, path):
+    def _cast(self, path, resume=0):
+        self._remember()                 # save position of the file we're leaving
         self._now_path = path
+        self._resume_base = resume
+        self._last_save = time.time()
         self._saw_playing = False
         self._user_stopped = False
         ok, msg = self.active.available()
@@ -361,7 +446,7 @@ class MainWindow(QMainWindow):
                 self.np_title.setText(str(res))
                 self._status(str(res))
             self.poll_cast()
-        run_async(lambda: self.active.start(path, items, self.auto_next), done)
+        run_async(lambda: self.active.start(path, items, self.auto_next, resume), done)
 
     def _t_rewind(self):
         return self.active.seek(-30)
@@ -374,12 +459,14 @@ class MainWindow(QMainWindow):
 
     def _t_stop(self):
         self._user_stopped = True
+        self._remember()
         if self.target == "vlc":
             self.now_title = None
         return self.active.stop()
 
     def _on_ended(self):
         """Current item finished. Auto-advance if the target needs us to, else clear."""
+        self._remember()                 # finished -> dropped from the continue list
         if (self.auto_next and not self._user_stopped and self._now_path
                 and self.active.needs_advance_on_end()):
             nxt = media.next_file(self._now_path)
@@ -400,6 +487,7 @@ class MainWindow(QMainWindow):
         self.np_time.setText("")
 
     def closeEvent(self, event):
+        self._remember()
         for t in self.targets.values():
             t.shutdown()           # cast: kill the server; vlc: leave it running
         if self.httpd:
@@ -583,6 +671,8 @@ class MainWindow(QMainWindow):
         self._np_playing = self._np_state in ("PLAYING", "")
         if self._np_state == "PLAYING":
             self._saw_playing = True
+        if self._np_playing and time.time() - self._last_save > 12:
+            self._remember()         # periodic save so a crash loses little
         self._render_np()
 
     def _render_np(self):

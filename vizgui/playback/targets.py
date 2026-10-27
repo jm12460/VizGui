@@ -40,7 +40,7 @@ class CastTarget(PlaybackTarget):
         if h:
             h.terminate()
 
-    def start(self, path, items, auto_next):
+    def start(self, path, items, auto_next, resume=0):
         plan = cast_plan(media.vcodec(path), os.path.splitext(path)[1])
         self.live = plan != "direct"
         if self.live and not platforms.has_tool("ffmpeg"):
@@ -54,14 +54,17 @@ class CastTarget(PlaybackTarget):
                 base + ["load", media.symlink_serve(path)], log_path=CASTER_LOG)
             what = "direct"
         else:
-            wrapper = write_wrapper(path, copy_video=(plan == "remux"))
+            # a live stream resumes by seeking the input (-ss); it begins at `resume`
+            wrapper = write_wrapper(path, copy_video=(plan == "remux"), start=resume)
             self.handle = platforms.launch_caster(
                 base + ["transcode", "--content-type", "video/mp4", "--command", wrapper],
                 log_path=CASTER_LOG)
             what = "live remux" if plan == "remux" else f"live transcode ({'hw' if HAS_HW else 'cpu'})"
         time.sleep(5)              # let it establish + the TV start
         alive = self.handle.poll() is None
-        log.info("caster pid=%s alive=%s (%s)", self.handle.pid, alive, what)
+        if alive and resume and plan == "direct":
+            gc("seek-to", str(int(resume)))   # direct file: seek the real timeline
+        log.info("caster pid=%s alive=%s (%s) resume=%s", self.handle.pid, alive, what, resume)
         return "playing" if alive else f"go-chromecast exited (rc={self.handle.returncode})"
 
     def stop(self):
@@ -109,7 +112,7 @@ class VlcTarget(PlaybackTarget):
             return False, "VLC isn't installed — can't use the VLC target."
         return True, ""
 
-    def start(self, path, items, auto_next):
+    def start(self, path, items, auto_next, resume=0):
         # 1) Our HTTP VLC is running -> send the whole folder as a native playlist.
         if "error" not in vlc_status():
             self.mode = "http"
@@ -117,6 +120,9 @@ class VlcTarget(PlaybackTarget):
             vlc_cmd("in_play&input=" + urllib.parse.quote(items[0]))
             for it in items[1:]:
                 vlc_cmd("in_enqueue&input=" + urllib.parse.quote(it))
+            if resume:
+                time.sleep(1)                       # let the item load before seeking
+                vlc_cmd(f"seek&val={int(resume)}")
             log.info("VLC(http) reuse: %d item(s)", len(items))
             return "playing"
         # 2) A VLC opened by hand (no HTTP) -> control over MPRIS; detect-and-load.
@@ -125,14 +131,18 @@ class VlcTarget(PlaybackTarget):
             mpris_cmd("open", path_to_uri(items[0]))
             if auto_next:
                 mpris_cmd("loop", "None")   # so a finished item STOPS -> we load next
+            if resume:
+                time.sleep(1)
+                mpris_cmd("position", str(int(resume)))
             log.info("VLC(mpris) open: %s", items[0])
             return "playing"
         # 3) No VLC -> launch our own (HTTP), stays open, native playlist.
         self.mode = "http"
+        start_arg = [f"--start-time={int(resume)}"] if resume else []
         self.proc = platforms.launch_detached(
             [platforms.vlc_exe(), "--extraintf", "http", "--http-host", "127.0.0.1",
              "--http-port", str(VLC_PORT), "--http-password", VLC_PW,
-             "--no-random", "--no-loop", "--no-repeat", *items],
+             "--no-random", "--no-loop", "--no-repeat", *start_arg, *items],
             log_path=CASTER_LOG)
         for _ in range(20):
             time.sleep(0.5)

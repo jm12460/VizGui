@@ -21,9 +21,10 @@ class PlaybackTarget:
         """-> (ok, message). ok False means a required tool is missing."""
         return True, ""
 
-    def start(self, path, items, auto_next):
-        """Begin playing `path`. `items` is the folder queue from `path` onward
-        (for targets with native playlists). Returns "playing" or an error string."""
+    def start(self, path, items, auto_next, resume=0):
+        """Begin playing `path`, optionally seeking to `resume` seconds. `items` is
+        the folder queue from `path` onward (for targets with native playlists).
+        Returns "playing" or an error string."""
         raise NotImplementedError
 
     def stop(self):

@@ -36,3 +36,13 @@ def test_wrapper_always_fragmented_mp4_stereo_aac():
     assert "frag_keyframe" in text and "-f mp4" in text
     assert "-c:a aac" in text and "-ac 2" in text
     assert text.rstrip().endswith("pipe:1")
+
+
+def test_wrapper_resume_adds_input_seek():
+    with tempfile.TemporaryDirectory() as d:
+        wp = os.path.join(d, "transcode.sh")
+        with mock.patch.object(transcode, "WRAPPER", wp), \
+             mock.patch.object(transcode.platforms, "hw_encode_args", return_value=None):
+            assert "-ss 600 -i" in open(transcode.write_wrapper("/m/x.mkv", False, start=600)).read()
+            assert "-ss 90 -i" in open(transcode.write_wrapper("/m/x.mkv", True, start=90)).read()
+            assert "-ss" not in open(transcode.write_wrapper("/m/x.mkv", True, start=0)).read()

@@ -104,3 +104,36 @@ def test_vlc_native_skip_and_advance_depend_on_mode():
     assert t.native_skip() is True and t.needs_advance_on_end() is False
     t.mode = "mpris"
     assert t.native_skip() is False and t.needs_advance_on_end() is True
+
+
+def test_cast_direct_resume_seeks_to():
+    t = targets.CastTarget()
+    calls = []
+    with mock.patch.object(targets, "gc", side_effect=lambda *a, **k: calls.append(a) or (True, "")), \
+         mock.patch.object(targets.media, "vcodec", return_value="h264"), \
+         mock.patch.object(targets.media, "symlink_serve", return_value="/cache/x.mp4"), \
+         mock.patch.object(targets.platforms, "launch_caster",
+                           return_value=mock.Mock(poll=lambda: None, pid=5, returncode=0)), \
+         mock.patch.object(targets.time, "sleep", lambda *a: None):
+        res = t.start("/m/x.mp4", ["/m/x.mp4"], False, resume=600)
+    assert res == "playing"
+    assert ("seek-to", "600") in calls
+
+
+def test_vlc_launch_includes_start_time_on_resume():
+    t = targets.VlcTarget()
+    captured = {}
+
+    def fake_launch(args, log_path=None):
+        captured["args"] = args
+        return mock.Mock(poll=lambda: None, pid=1)
+
+    with mock.patch.object(targets, "vlc_status",
+                           side_effect=[{"error": "x"}, {"state": "PLAYING"}]), \
+         mock.patch.object(targets.platforms, "supports_mpris", return_value=False), \
+         mock.patch.object(targets.platforms, "launch_detached", fake_launch), \
+         mock.patch.object(targets.platforms, "vlc_exe", return_value="vlc"), \
+         mock.patch.object(targets.time, "sleep", lambda *a: None):
+        res = t.start("/m/x.mkv", ["/m/x.mkv"], False, resume=300)
+    assert res == "playing"
+    assert "--start-time=300" in captured["args"]
