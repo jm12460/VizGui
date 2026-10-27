@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+
+# build artifacts
+build/
+dist/
+*.egg-info/

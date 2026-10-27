@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vizgui"
+description = "Cast local media to a SmartCast TV / Chromecast or VLC, with a remote, a phone web-remote, live transcoding, and SMB sources."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dynamic = ["version"]
+authors = [{ name = "jm12460" }]
+keywords = ["chromecast", "smartcast", "vlc", "cast", "media", "qt", "pyside6"]
+classifiers = [
+    "Environment :: X11 Applications :: Qt",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Video",
+]
+
+# Only PySide6 is a Python dependency. The rest are system tools the app shells
+# out to (ffmpeg, vlc, playerctl, gvfs-smb, qrencode, and the go-chromecast
+# binary) and are declared by the OS package / documented in the README.
+dependencies = ["PySide6>=6.5"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/jm12460/VizGui"
+Repository = "https://github.com/jm12460/VizGui"
+
+# GUI entry point: `gui-scripts` so Windows later gets no stray console window;
+# on Linux it behaves exactly like a console script.
+[project.gui-scripts]
+viz-gui = "vizgui.app:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "vizgui.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["vizgui*"]
+
+# remote.html is read from beside webremote.py at runtime, so it must ship
+# inside the installed package.
+[tool.setuptools.package-data]
+vizgui = ["*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

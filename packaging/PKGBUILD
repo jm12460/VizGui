@@ -1,0 +1,49 @@
+# Maintainer: jm12460 <jmccallu6@gmail.com>
+#
+# vizgui-git: builds from the main branch. A stable `vizgui` package (built from
+# tagged releases) will replace this as the primary once releases exist.
+pkgname=vizgui-git
+_pkgname=vizgui
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc="Cast local media to a SmartCast TV / Chromecast or VLC, with a remote, a phone web-remote, live transcoding, and SMB sources"
+arch=('any')
+url="https://github.com/jm12460/VizGui"
+license=('MIT')
+depends=(
+    'python'
+    'pyside6'
+    'ffmpeg'       # live remux / transcode
+    'vlc'          # VLC playback target
+    'playerctl'    # MPRIS control of a hand-opened VLC
+    'gvfs-smb'     # on-demand SMB mounts
+    'qrencode'     # phone-remote pairing QR (optional at runtime)
+    'go-chromecast-git'  # casting; the only AUR dep (builds from Go source)
+)
+makedepends=('git' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+provides=('vizgui')
+conflicts=('vizgui')
+source=("$_pkgname::git+https://github.com/jm12460/VizGui.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$srcdir/$_pkgname"
+    # No release tags yet: base version from __init__ + commit count + short hash.
+    local base
+    base="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' vizgui/__init__.py)"
+    printf "%s.r%s.g%s" "$base" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+    cd "$srcdir/$_pkgname"
+    python -m build --wheel --no-isolation
+}
+
+package() {
+    cd "$srcdir/$_pkgname"
+    python -m installer --destdir="$pkgdir" dist/*.whl
+
+    install -Dm644 packaging/vizgui.desktop "$pkgdir/usr/share/applications/vizgui.desktop"
+    install -Dm644 packaging/vizgui.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/vizgui.svg"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
