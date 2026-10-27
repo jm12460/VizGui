@@ -61,3 +61,12 @@ def test_vlc_any_status_falls_back_to_mpris():
          mock.patch.object(vlc, "mpris_status", return_value={"state": "PLAYING"}):
         s = vlc.vlc_any_status()
     assert s["_mode"] == "mpris"
+
+
+def test_vlc_any_status_skips_mpris_when_unsupported():
+    with mock.patch.object(vlc, "vlc_status", return_value={"error": "x"}), \
+         mock.patch.object(vlc.platforms, "supports_mpris", return_value=False), \
+         mock.patch.object(vlc, "mpris_status") as mp:
+        s = vlc.vlc_any_status()
+    assert "error" in s
+    mp.assert_not_called()

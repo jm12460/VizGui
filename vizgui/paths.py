@@ -1,15 +1,20 @@
-"""Filesystem paths, external tool locations, and logging setup."""
+"""Filesystem paths, external tool locations, and logging setup.
+
+OS-specific locations come from the platform layer, so this stays portable.
+"""
 import logging
 import os
 
-GC = os.path.expanduser("~/.local/bin/go-chromecast")
-CACHE = os.path.expanduser("~/.cache/cast")  # safe-named symlinks to media live here
+from . import platforms
+
+GC = platforms.find_tool("go-chromecast", ["~/.local/bin/go-chromecast"])
 VIDEO_GLOBS = ["*.mp4", "*.mkv", "*.m4v", "*.webm", "*.mov", "*.avi", "*.m2ts", "*.ts"]
 
-CONFIG_DIR = os.path.expanduser("~/.config/vizgui")
+CONFIG_DIR = platforms.config_dir()
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 
-LOG_DIR = os.path.expanduser("~/.cache/viz-gui")
+CACHE = platforms.cache_dir()          # served media (symlinks / remuxes)
+LOG_DIR = platforms.log_dir()
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_PATH = os.path.join(LOG_DIR, "viz-gui.log")
 CASTER_LOG = os.path.join(LOG_DIR, "caster.log")   # go-chromecast / VLC's own output

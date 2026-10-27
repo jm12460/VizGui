@@ -11,6 +11,7 @@ from ..sources import smb_mount
 from ..chromecast import scan_cast_devices
 from ..smartcast import sc_pair_start, sc_pair_finish
 from ..net import local_ip, lan_cidr
+from .. import platforms
 
 
 class SmbDialog(QDialog):
@@ -129,7 +130,8 @@ class SetupDialog(QDialog):
     def _upd_web(self):
         port = (self.web_port.text().strip() or "8950")
         self.web_url.setText(f"→  http://{local_ip()}:{port}")
-        self.web_cmd.setText(f"sudo ufw allow from {lan_cidr()} to any port {port} proto tcp")
+        cmd = platforms.firewall_allow_cmd(lan_cidr(), port)
+        self.web_cmd.setText(cmd or "Allow this port on your LAN in your firewall settings.")
 
     def _refresh_pin(self, reveal=False):
         pin = config.CFG.get("web", {}).get("pin", "------") if reveal else "••••••"

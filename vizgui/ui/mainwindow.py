@@ -2,12 +2,9 @@
 remote, and status together."""
 import glob
 import os
-import pty
 import re
 import secrets
-import signal
 import subprocess
-import threading
 import time
 import urllib.parse
 from functools import partial
@@ -21,9 +18,10 @@ from PySide6.QtWidgets import (
 )
 
 from .. import config
+from .. import platforms
 from ..config import save_config, load_config
 from ..paths import GC, CACHE, VIDEO_GLOBS, CASTER_LOG, log
-from ..transcode import HAS_NVENC, write_wrapper
+from ..transcode import HAS_HW, write_wrapper
 from ..smartcast import sc_status
 from ..chromecast import gc
 from ..vlc import (vlc_cmd, vlc_status, vlc_any_status, mpris_cmd, mpris_running,
@@ -298,51 +296,18 @@ class MainWindow(QMainWindow):
             return path
 
     def _launch_caster(self, args, env=None):
-        """Start go-chromecast on a PTY (so it keeps its HTTP server alive) and
-        drain its output. Returns the Popen. Its process group is killed on stop,
-        taking any ffmpeg transcode child with it."""
-        master, slavefd = pty.openpty()
-        p = subprocess.Popen(args, stdin=slavefd, stdout=slavefd, stderr=slavefd,
-                             start_new_session=True, close_fds=True, env=env)
-        os.close(slavefd)
-        self.caster = p
-        threading.Thread(target=self._drain_pty, args=(master,), daemon=True).start()
-        return p
+        """Start the go-chromecast media server via the platform launcher (a PTY
+        on Linux so it keeps its HTTP server alive), output drained to the log.
+        Returns a handle; terminating it kills any ffmpeg transcode child too."""
+        self.caster = platforms.launch_caster(args, env=env, log_path=CASTER_LOG)
+        return self.caster
 
     def _kill_caster(self):
-        """Terminate the go-chromecast process group we own (if any). Using the
-        group takes down any ffmpeg child it spawned for transcoding too."""
-        p = self.caster
+        """Terminate the go-chromecast server we own (if any), tree and all."""
+        h = self.caster
         self.caster = None
-        if p and p.poll() is None:
-            for sig in (signal.SIGTERM, signal.SIGKILL):
-                try:
-                    os.killpg(os.getpgid(p.pid), sig)
-                    p.wait(timeout=3)
-                    break
-                except ProcessLookupError:
-                    break
-                except Exception:
-                    pass
-
-    def _drain_pty(self, master):
-        """Read go-chromecast's PTY output to CASTER_LOG until it exits, so the
-        terminal buffer never fills and stalls it (and we can see why it dies)."""
-        try:
-            with open(CASTER_LOG, "wb") as f:
-                while True:
-                    data = os.read(master, 4096)
-                    if not data:
-                        break
-                    f.write(data)
-                    f.flush()
-        except OSError:
-            pass
-        finally:
-            try:
-                os.close(master)
-            except OSError:
-                pass
+        if h:
+            h.terminate()
 
     def _kill_vlc(self):
         p = self.vlc_proc
@@ -385,8 +350,8 @@ class MainWindow(QMainWindow):
                 log.info("VLC(http) reuse: %d item(s)", len(items))
                 return "playing"
             # 2) A VLC opened by hand is running (no HTTP) -> control it over
-            #    MPRIS. Load this file; auto-next is detect-end-and-load.
-            if mpris_running():
+            #    MPRIS (where supported). Load this file; auto-next detect-and-load.
+            if platforms.supports_mpris() and mpris_running():
                 self._vlc_mode = "mpris"
                 mpris_cmd("open", path_to_uri(items[0]))
                 if self.auto_next:
@@ -397,16 +362,13 @@ class MainWindow(QMainWindow):
                 log.info("VLC(mpris) open: %s (loop=%s)", items[0], "None" if self.auto_next else "kept")
                 return "playing"
             # 3) No VLC at all -> launch our own (HTTP), STAYS OPEN, native
-            #    playlist. Survives app close (own session).
+            #    playlist. Survives app close (detached session).
             self._vlc_mode = "http"
-            logf = open(CASTER_LOG, "wb")
-            p = subprocess.Popen(
+            p = platforms.launch_detached(
                 ["vlc", "--extraintf", "http", "--http-host", "127.0.0.1",
                  "--http-port", str(VLC_PORT), "--http-password", VLC_PW,
                  "--no-random", "--no-loop", "--no-repeat", *items],
-                stdin=subprocess.DEVNULL, stdout=logf, stderr=logf,
-                start_new_session=True)
-            logf.close()
+                log_path=CASTER_LOG)
             self.vlc_proc = p
             ok = False
             for _ in range(20):
@@ -528,7 +490,7 @@ class MainWindow(QMainWindow):
                 p = self._launch_caster(base + ["transcode", "--content-type",
                                                 "video/mp4", "--command", wrapper])
                 what = ("live remux" if copy_video
-                        else f"live transcode ({'nvenc' if HAS_NVENC else 'cpu'})")
+                        else f"live transcode ({'hw' if HAS_HW else 'cpu'})")
             time.sleep(5)                           # let it establish + the TV start
             alive = p.poll() is None
             log.info("caster pid=%s alive=%s (%s)", p.pid, alive, what)

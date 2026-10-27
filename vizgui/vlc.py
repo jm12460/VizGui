@@ -12,6 +12,8 @@ import subprocess
 import urllib.parse
 import urllib.request
 
+from . import platforms
+
 VLC_PORT = 9099
 VLC_PW = "vizgui"
 VLC_URL = f"http://127.0.0.1:{VLC_PORT}/requests/status.xml"
@@ -114,13 +116,15 @@ def mpris_status():
 
 
 def vlc_any_status():
-    """Prefer our HTTP VLC; fall back to MPRIS (a manually-opened VLC)."""
+    """Prefer our HTTP VLC; fall back to MPRIS (a manually-opened VLC) where the
+    platform supports it."""
     s = vlc_status()
     if "error" not in s:
         s["_mode"] = "http"
         return s
-    m = mpris_status()
-    if "error" not in m:
-        m["_mode"] = "mpris"
-        return m
+    if platforms.supports_mpris():
+        m = mpris_status()
+        if "error" not in m:
+            m["_mode"] = "mpris"
+            return m
     return {"error": "no vlc"}

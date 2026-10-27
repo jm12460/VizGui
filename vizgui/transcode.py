@@ -1,45 +1,36 @@
-"""GPU/CPU transcode: NVENC detection and the live-transcode wrapper script."""
+"""The live-transcode wrapper script go-chromecast runs. The video encoder is
+chosen by the platform layer (hardware if available, else software libx264)."""
 import os
 import shlex
-import subprocess
 
+from . import platforms
 from .paths import WRAPPER
 
-
-def _has_nvenc():
-    try:
-        r = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
-                           capture_output=True, text=True, timeout=10)
-        return "h264_nvenc" in r.stdout
-    except Exception:
-        return False
-
-
-HAS_NVENC = _has_nvenc()   # use the GPU when available, else fall back to libx264
+# True if this platform/GPU offers a hardware H.264 encoder (for UI/logging).
+HAS_HW = platforms.hw_encode_args() is not None
 
 
 def write_wrapper(path, copy_video=False):
-    """Write the transcode helper go-chromecast runs for live streaming. The
-    source path is embedded (shell-quoted, so spaces/+/() are safe) and the helper
-    streams the video + stereo AAC as fragmented mp4 to stdout. Returns the script
-    path (space-free, under ~/.cache, since go-chromecast splits --command on spaces).
+    """Write the helper go-chromecast runs for live streaming. The source path is
+    embedded (shell-quoted, so spaces/+/() are safe) and the helper streams the
+    video + stereo AAC as fragmented mp4 to stdout. Returns the script path
+    (space-free, under the cache dir, since go-chromecast splits --command on spaces).
 
     copy_video=True: the video is already H.264, so just repackage it (``-c:v copy``)
-    - a near-free live REMUX (no re-encode, no quality loss). Used for H.264 in a
-    container go-chromecast can't serve directly (e.g. mkv), to avoid go-chromecast's
-    own slow CPU transcode. Otherwise re-encode to H.264 via NVENC (or libx264)."""
+    - a near-free live REMUX (no re-encode) for H.264 in a container go-chromecast
+    can't serve directly (e.g. mkv). Otherwise re-encode to H.264 using the
+    platform's hardware encoder, or software libx264 as a fallback."""
     q = shlex.quote(os.path.abspath(path))
     if copy_video:
-        vin = f"-i {q}"
-        venc = "-c:v copy"
-    elif HAS_NVENC:
-        vin = f"-hwaccel cuda -i {q}"
-        venc = ("-c:v h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 0 "
-                "-maxrate 12M -bufsize 24M -g 48 -bf 0")
+        vin, venc = f"-i {q}", "-c:v copy"
     else:
-        vin = f"-i {q}"
-        venc = ("-c:v libx264 -preset veryfast -tune zerolatency -crf 23 "
-                "-maxrate 10M -bufsize 20M -g 48 -bf 0")
+        hw = platforms.hw_encode_args()
+        if hw:
+            vin, venc = f"{hw[0]} -i {q}", hw[1]
+        else:
+            vin = f"-i {q}"
+            venc = ("-c:v libx264 -preset veryfast -tune zerolatency -crf 23 "
+                    "-maxrate 10M -bufsize 20M -g 48 -bf 0")
     text = ("#!/usr/bin/env bash\n"
             "exec ffmpeg " + vin + " " + venc +
             " -c:a aac -ac 2 -b:a 192k"
