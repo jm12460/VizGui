@@ -101,4 +101,9 @@ class RemotePanel(QFrame):
             except Exception as e:
                 log.warning("key %s %s FAILED: %s", cmd, KEYS[cmd], e)
                 return {"error": str(e)}
-        run_async(fire)
+        run_async(fire, self._sent)
+
+    def _sent(self, res):
+        # a key that didn't reach the TV should say so, not fail silently
+        if isinstance(res, dict) and "error" in res and self.win:
+            self.win._status("TV didn't respond — is it on and on the same Wi-Fi?")

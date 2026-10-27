@@ -7,6 +7,7 @@ from . import platforms
 def local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
+        s.settimeout(1)   # never block the UI, even on a pathological network
         s.connect(("8.8.8.8", 80))
         return s.getsockname()[0]
     except Exception:
