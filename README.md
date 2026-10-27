@@ -1,5 +1,7 @@
 # vizgui
 
+[![CI](https://github.com/jm12460/VizGui/actions/workflows/ci.yml/badge.svg)](https://github.com/jm12460/VizGui/actions/workflows/ci.yml)
+
 Cast local media to a SmartCast TV / Chromecast, or play it in VLC — with an
 on-screen remote, a phone web-remote, SMB network sources, auto-play-next, and a
 first-run setup wizard. A single-user desktop app (PySide6/Qt).

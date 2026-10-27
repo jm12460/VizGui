@@ -55,10 +55,13 @@ Turn "clone + shim + curl a binary" into a real, managed package.
 Needed before AUR/Flatpak can pull versioned tarballs, and before multi-platform
 makes manual testing untenable.
 
-- [ ] **GitHub Actions**: run the test suite on push/PR.
-- [ ] A **release process**: version bump → git tag → GitHub release (AUR &
-      Flatpak reference these tags).
-- [ ] **`CHANGELOG.md`** (keep-a-changelog style).
+- [x] **GitHub Actions**: run the test suite on push/PR
+      (`.github/workflows/ci.yml`, Python 3.10 + 3.12).
+- [x] A **release process**: push a `v*` tag → `release.yml` builds sdist/wheel
+      and cuts a GitHub release (AUR & Flatpak can reference these tags).
+- [x] **`CHANGELOG.md`** (keep-a-changelog style).
+- [ ] Cut the first **`v0.1.0`** tag, then add a stable `vizgui` PKGBUILD built
+      from the release tarball (alongside `vizgui-git`).
 
 **Risk:** low.
 
