@@ -24,7 +24,8 @@ header .t{font-weight:800;font-size:17px}
 .bar>i{display:block;height:100%;width:0;background:var(--ac);border-radius:3px}
 .time{color:var(--dim);font-size:12px;text-align:right;min-height:14px}
 .trow{display:flex;gap:8px;margin-top:8px}
-.trow>button{flex:1;padding:12px 4px;font-size:18px}
+.trow>button{flex:1;padding:12px 4px}
+.ti{width:22px;height:22px;fill:currentColor;display:block;margin:0 auto}
 /* views */
 .view{display:none;padding:0 16px}
 .view.on{display:block}
@@ -91,12 +92,12 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
   <div class="bar"><i id="prog"></i></div>
   <div id="time" class="time"></div>
   <div class="trow">
-   <button onclick="tr('prev')" title="Previous">⏮</button>
-   <button class="ac" onclick="tr('playpause')" title="Play / Pause">⏯</button>
-   <button onclick="tr('next')" title="Next">⏭</button>
-   <button onclick="tr('rewind')" title="Back 30s">⏪</button>
-   <button onclick="tr('stop')" title="Stop">⏹</button>
-   <button onclick="tr('forward')" title="Forward 30s">⏩</button>
+   <button onclick="tr('prev')" title="Previous"><svg class="ti" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
+   <button class="ac" onclick="tr('playpause')" title="Play / Pause"><svg class="ti" viewBox="0 0 24 24"><path id="ppath" d="M8 5v14l11-7z"/></svg></button>
+   <button onclick="tr('next')" title="Next"><svg class="ti" viewBox="0 0 24 24"><path d="M6 6l8.5 6L6 18V6zm10 0h2v12h-2z"/></svg></button>
+   <button onclick="tr('rewind')" title="Back 30s"><svg class="ti" viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><text x="12" y="15.3" text-anchor="middle" style="font-size:7px;font-weight:800;font-family:-apple-system,sans-serif">30</text></svg></button>
+   <button onclick="tr('stop')" title="Stop"><svg class="ti" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>
+   <button onclick="tr('forward')" title="Forward 30s"><svg class="ti" viewBox="0 0 24 24"><g transform="translate(24,0) scale(-1,1)"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></g><text x="12" y="15.3" text-anchor="middle" style="font-size:7px;font-weight:800;font-family:-apple-system,sans-serif">30</text></svg></button>
   </div>
  </div>
 </div>
@@ -152,6 +153,7 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
 
 <script>
 let curSrc=0, curSub="", anState=true, lastTargets=null, lastSources=null;
+const I_PLAY='M8 5v14l11-7z', I_PAUSE='M6 5h4v14H6zm8 0h4v14h-4z';
 if(location.hash.indexOf('t=')>=0){try{localStorage.setItem('viztoken',decodeURIComponent(location.hash.split('t=')[1]));history.replaceState(null,'',location.pathname);}catch(e){}}
 let TOKEN=localStorage.getItem('viztoken')||'';
 function $(id){return document.getElementById(id);}
@@ -177,6 +179,7 @@ async function poll(){const d=await api('/api/status');if(!d.ok)return;
  const n=d.now||{};
  $('np').textContent=n.title||'Nothing playing.';
  $('badge').style.display=n.live?'inline-block':'none';
+ const pp=$('ppath');if(pp)pp.setAttribute('d',n.state==='PLAYING'?I_PAUSE:I_PLAY);
  const prog=$('prog'),tm=$('time');
  if(n.live){prog.style.width='100%';tm.textContent=fmt(n.pos)+'  ·  live';}
  else if(n.dur>0){prog.style.width=(100*Math.min(n.pos,n.dur)/n.dur)+'%';tm.textContent=fmt(n.pos)+' / '+fmt(n.dur)+(n.state&&n.state!=='PLAYING'?'  ·  '+n.state.toLowerCase():'');}
