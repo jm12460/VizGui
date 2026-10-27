@@ -108,7 +108,7 @@ class MainWindow(QMainWindow):
             tag = "  (SMB)" if s.get("kind") == "smb" else ""
             self.source_box.addItem((s.get("name") or s.get("path", "?")) + tag, s)
         self.source_box.currentIndexChanged.connect(self._source_changed)
-        self.b_continue = QPushButton("▶ Continue")
+        self.b_continue = QPushButton("▶ Continue watching")
         self.b_continue.setToolTip("Resume something you were watching")
         self.b_continue.clicked.connect(self.show_continue)
         self.b_setup = QPushButton("⚙ Setup"); self.b_setup.clicked.connect(self.open_setup)
