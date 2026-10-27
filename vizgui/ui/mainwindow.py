@@ -343,7 +343,7 @@ class MainWindow(QMainWindow):
 
     def show_continue(self):
         """Continue-watching list: resume on the current target, forget, or clear."""
-        items = history.recent()
+        items = [it for it in history.recent() if it.get("path") != self._now_path]
         dlg = QDialog(self); dlg.setWindowTitle("Continue watching"); dlg.resize(460, 420)
         lay = QVBoxLayout(dlg)
         lst = QListWidget()
@@ -566,6 +566,12 @@ class MainWindow(QMainWindow):
         if self._pair_fails >= 5:
             self._pair_locked = True
         return {"ok": False, "locked": self._pair_locked}
+
+    def web_history(self):
+        """Continue-watching items for the phone, minus whatever's playing now
+        (so the current file isn't duplicated under the now-playing bar)."""
+        cur = self._now_path
+        return [it for it in history.recent() if it.get("path") != cur]
 
     def web_status(self):
         """Snapshot for the phone UI - reads cached state only (HTTP-thread safe)."""

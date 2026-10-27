@@ -12,7 +12,6 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from PySide6.QtCore import QObject, Signal
 
 from . import config
-from . import history
 from .paths import VIDEO_GLOBS
 from .sources import source_path
 from .chromecast import scan_cast_devices
@@ -69,7 +68,7 @@ class _WebHandler(BaseHTTPRequestHandler):
         if u.path == "/api/scan":
             return self._json({"ok": True, "devices": scan_cast_devices()})
         if u.path == "/api/history":
-            return self._json({"ok": True, "items": history.recent()})
+            return self._json({"ok": True, "items": self.win.web_history()})
         return self._send(404, "not found", "text/plain")
 
     def do_POST(self):
