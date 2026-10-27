@@ -26,6 +26,29 @@ def fmt_time(s):
     return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
 
 
+def discovery_plan(devs, targets):
+    """Decide what a Cast scan should do, given its results and the current targets.
+    Pure (no UI): returns (to_add, status_message).
+      - fresh setup (no Cast target yet): auto-add everything found
+      - otherwise: don't auto-add; just report what else is on the network
+    """
+    if not isinstance(devs, list):
+        devs = []   # run_async wraps a failed scan as an error dict
+    cast_addrs = {t.get("addr") for t in targets if t.get("type") == "cast"}
+    new = [d for d in devs if d.get("addr") not in cast_addrs]
+    if new and not cast_addrs:
+        names = ", ".join(d["name"] for d in new)
+        return new, (f"✓ Found and added: {names}. Select it and “Pair SmartCast…” "
+                     "to enable the remote.")
+    if new:
+        names = ", ".join(f"{d['name']} ({d['addr']})" for d in new)
+        return [], f"Also on your network: {names} — use “Scan for Cast devices” to add."
+    if devs:
+        return [], ""   # everything found is already a target
+    return [], ("No Cast devices found yet. Make sure the TV is on and on the same Wi-Fi, "
+                "then click “Scan for Cast devices”.")
+
+
 def parse_status(line):
     """Parse a go-chromecast status line into {state, pos, dur, file}.
     Example: 'Default Media Receiver (PAUSED), [http://...media_file=/p/x.mp4&...],

@@ -1,4 +1,4 @@
-from vizgui.helpers import fmt_time, parse_status, cast_plan
+from vizgui.helpers import fmt_time, parse_status, cast_plan, discovery_plan
 
 
 def test_fmt_time_minutes():
@@ -46,3 +46,42 @@ def test_parse_status_idle():
     d = parse_status("Idle (Backdrop), volume=0.17 muted=false")
     assert d["state"] == "IDLE"
     assert "pos" not in d
+
+
+# --- discovery_plan (Cast auto-discovery decision) ---
+_TV = {"name": "Living Room", "addr": "10.0.0.105", "cast_port": "8009"}
+
+
+def test_discovery_fresh_autoadds_everything():
+    to_add, msg = discovery_plan([_TV], [])
+    assert to_add == [_TV]
+    assert "Found and added" in msg
+
+
+def test_discovery_does_not_autoadd_when_a_cast_target_exists():
+    targets = [{"type": "cast", "addr": "10.0.0.50"}]
+    to_add, msg = discovery_plan([_TV], targets)
+    assert to_add == []
+    assert "Also on your network" in msg
+
+
+def test_discovery_all_known_is_silent():
+    targets = [{"type": "cast", "addr": "10.0.0.105"}]
+    to_add, msg = discovery_plan([_TV], targets)
+    assert to_add == [] and msg == ""
+
+
+def test_discovery_none_found_hint():
+    to_add, msg = discovery_plan([], [])
+    assert to_add == [] and "No Cast devices found" in msg
+
+
+def test_discovery_handles_error_dict():
+    to_add, msg = discovery_plan({"error": "boom"}, [])
+    assert to_add == [] and "No Cast devices found" in msg
+
+
+def test_discovery_vlc_target_does_not_count_as_cast():
+    # a VLC-only setup is still "fresh" for Cast, so a found TV auto-adds
+    to_add, _ = discovery_plan([_TV], [{"type": "vlc"}])
+    assert to_add == [_TV]

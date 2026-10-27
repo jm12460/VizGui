@@ -82,8 +82,27 @@ def lan_cidr(ip):
     return ".".join(ip.split(".")[:3]) + ".0/24"
 
 
+def _svc_active(name):
+    """Is a systemd service active? (root-free, so safe to call from the UI.)"""
+    try:
+        return subprocess.run(["systemctl", "is-active", "--quiet", name],
+                              timeout=3).returncode == 0
+    except Exception:
+        return False
+
+
 def firewall_allow_cmd(cidr, port):
-    return f"sudo ufw allow from {cidr} to any port {port} proto tcp"
+    """The command to open the phone-remote port for the LAN, matched to whichever
+    firewall is actually running. None when no known firewall is active (the port
+    is then already reachable)."""
+    if _svc_active("ufw"):
+        return f"sudo ufw allow from {cidr} to any port {port} proto tcp"
+    if _svc_active("firewalld"):
+        return ("sudo firewall-cmd --permanent --add-rich-rule="
+                f"'rule family=\"ipv4\" source address=\"{cidr}\" "
+                f"port port=\"{port}\" protocol=\"tcp\" accept' "
+                "&& sudo firewall-cmd --reload")
+    return None
 
 
 def supports_mpris():

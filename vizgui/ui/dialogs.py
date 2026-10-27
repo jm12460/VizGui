@@ -3,14 +3,16 @@ import os
 
 from PySide6.QtWidgets import (QDialog, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
                                QLineEdit, QCheckBox, QFormLayout, QListWidget, QFileDialog,
-                               QMessageBox, QInputDialog, QDialogButtonBox)
+                               QMessageBox, QInputDialog, QDialogButtonBox, QTabWidget, QWidget)
 
 from .. import config
 from ..config import save_config
 from ..sources import smb_mount
 from ..chromecast import scan_cast_devices
+from ..helpers import discovery_plan
 from ..smartcast import sc_pair_start, sc_pair_finish
 from ..net import local_ip, lan_cidr
+from ..qtasync import run_async
 from .. import platforms
 
 
@@ -57,50 +59,59 @@ class SetupDialog(QDialog):
         super().__init__(parent)
         self.win = parent
         self.setWindowTitle("viz-gui Setup")
-        self.resize(580, 560)
+        self.resize(560, 470)
         self.sources = [dict(s) for s in config.CFG.get("sources", [])]
         self.targets = [dict(t) for t in config.CFG.get("targets", [])]
         self.web = dict(config.CFG.get("web", {"enabled": True, "port": 8950}))
-        lay = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        tabs = QTabWidget(); root.addWidget(tabs, 1)
 
-        lay.addWidget(QLabel("Media sources (folders / NAS mounts)"))
-        self.src_list = QListWidget(); lay.addWidget(self.src_list)
+        # ---- Sources tab ----
+        srcw = QWidget(); sv = QVBoxLayout(srcw)
+        sv.addWidget(QLabel("Media sources (folders / NAS mounts)"))
+        self.src_list = QListWidget(); sv.addWidget(self.src_list, 1)
         sb = QHBoxLayout()
         b_add = QPushButton("Add folder…"); b_add.clicked.connect(self._add_source)
         b_smb = QPushButton("Add SMB share…"); b_smb.clicked.connect(self._add_smb)
         b_rms = QPushButton("Remove"); b_rms.clicked.connect(self._rm_source)
         sb.addWidget(b_add); sb.addWidget(b_smb); sb.addWidget(b_rms); sb.addStretch(1)
-        lay.addLayout(sb)
+        sv.addLayout(sb)
         hint = QLabel("A folder is any local path or already-mounted drive. "
                       "Add SMB share connects to a NAS over the network (no mounting needed).")
-        hint.setObjectName("status"); hint.setWordWrap(True); lay.addWidget(hint)
+        hint.setObjectName("status"); hint.setWordWrap(True); sv.addWidget(hint)
+        tabs.addTab(srcw, "Sources")
 
-        lay.addWidget(QLabel("Cast / playback targets"))
-        self.tgt_list = QListWidget(); lay.addWidget(self.tgt_list)
+        # ---- Cast & VLC tab ----
+        tgtw = QWidget(); tv = QVBoxLayout(tgtw)
+        tv.addWidget(QLabel("Cast / playback targets"))
+        self.tgt_list = QListWidget(); tv.addWidget(self.tgt_list, 1)
         tb = QHBoxLayout()
-        b_scan = QPushButton("Scan for Cast devices"); b_scan.clicked.connect(self._scan)
+        self.b_scan = QPushButton("Scan for Cast devices"); self.b_scan.clicked.connect(self._scan)
         b_pair = QPushButton("Pair SmartCast…"); b_pair.clicked.connect(self._pair)
         b_vlc = QPushButton("Add local VLC"); b_vlc.clicked.connect(self._add_vlc)
         b_rmt = QPushButton("Remove"); b_rmt.clicked.connect(self._rm_target)
-        for b in (b_scan, b_pair, b_vlc, b_rmt):
+        for b in (self.b_scan, b_pair, b_vlc, b_rmt):
             tb.addWidget(b)
-        lay.addLayout(tb)
+        tv.addLayout(tb)
+        self.tgt_status = QLabel(); self.tgt_status.setObjectName("status")
+        self.tgt_status.setWordWrap(True); tv.addWidget(self.tgt_status)
+        tabs.addTab(tgtw, "Cast && VLC")
 
-        lay.addWidget(QLabel("Phone remote (control from a phone's browser)"))
+        # ---- Phone Remote tab ----
+        webw = QWidget(); wv = QVBoxLayout(webw)
         self.web_enabled = QCheckBox("Enable — serves a remote page any phone on your Wi-Fi can open")
         self.web_enabled.setChecked(bool(self.web.get("enabled", True)))
+        wv.addWidget(self.web_enabled)
         pr = QHBoxLayout()
         pr.addWidget(QLabel("Port:"))
         self.web_port = QLineEdit(str(self.web.get("port", 8950))); self.web_port.setMaximumWidth(90)
         pr.addWidget(self.web_port)
         self.web_url = QLabel(); self.web_url.setObjectName("dim")
         pr.addWidget(self.web_url, 1)
-        lay.addWidget(self.web_enabled)
-        lay.addLayout(pr)
-        fwhint = QLabel("Your firewall blocks this by default. Run this once in a terminal "
-                        "to allow only your home network (changes apply when you restart viz-gui):")
-        fwhint.setObjectName("status"); fwhint.setWordWrap(True); lay.addWidget(fwhint)
-        self.web_cmd = QLineEdit(); self.web_cmd.setReadOnly(True); lay.addWidget(self.web_cmd)
+        wv.addLayout(pr)
+        self.fwhint = QLabel()
+        self.fwhint.setObjectName("status"); self.fwhint.setWordWrap(True); wv.addWidget(self.fwhint)
+        self.web_cmd = QLineEdit(); self.web_cmd.setReadOnly(True); wv.addWidget(self.web_cmd)
         self.web_port.textChanged.connect(self._upd_web)
         self._upd_web()
 
@@ -119,19 +130,31 @@ class SetupDialog(QDialog):
         b_new.setToolTip("Fresh PIN and QR — un-pairs all currently paired phones")
         pairrow.addWidget(self.pin_lbl); pairrow.addWidget(self.b_eye); pairrow.addStretch(1)
         pairrow.addWidget(b_qr); pairrow.addWidget(b_new)
-        lay.addLayout(pairrow)
+        wv.addLayout(pairrow)
         self._refresh_pin()
+        wv.addStretch(1)
+        tabs.addTab(webw, "Phone Remote")
 
         bb = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         bb.accepted.connect(self._save); bb.rejected.connect(self.reject)
-        lay.addWidget(bb)
+        root.addWidget(bb)
         self._refresh()
+        self._autoscan()   # look for the TV in the background so the user needn't type an IP
 
     def _upd_web(self):
         port = (self.web_port.text().strip() or "8950")
         self.web_url.setText(f"→  http://{local_ip()}:{port}")
         cmd = platforms.firewall_allow_cmd(lan_cidr(), port)
-        self.web_cmd.setText(cmd or "Allow this port on your LAN in your firewall settings.")
+        if cmd:
+            self.fwhint.setText("Your firewall blocks this by default. Run this once in a "
+                                "terminal to allow only your home network (changes apply when "
+                                "you restart viz-gui):")
+            self.web_cmd.setText(cmd); self.web_cmd.show()
+        else:
+            self.fwhint.setText("No active firewall detected — your phone should reach this "
+                                f"already. If you set one up later, allow TCP port {port} "
+                                "from your home network.")
+            self.web_cmd.clear(); self.web_cmd.hide()
 
     def _refresh_pin(self, reveal=False):
         pin = config.CFG.get("web", {}).get("pin", "------") if reveal else "••••••"
@@ -199,20 +222,54 @@ class SetupDialog(QDialog):
         if 0 <= i < len(self.sources):
             del self.sources[i]; self._refresh()
 
+    def _add_device(self, d):
+        """Add a discovered Cast device if not already a target. -> added?"""
+        if any(t.get("type") == "cast" and t.get("addr") == d["addr"] for t in self.targets):
+            return False
+        self.targets.append({"type": "cast", "name": d["name"], "addr": d["addr"],
+                             "cast_port": d.get("cast_port", "8009")})
+        return True
+
+    def _autoscan(self):
+        """Background discovery on open, so a first-run user sees their TV with no clicks."""
+        self.tgt_status.setText("🔍 Looking for Cast devices on your network…")
+        run_async(scan_cast_devices, self._autoscan_done)
+
+    def _autoscan_done(self, devs):
+        try:
+            to_add, msg = discovery_plan(devs, self.targets)
+            for d in to_add:
+                self._add_device(d)
+            if to_add:
+                self._refresh()
+            self.tgt_status.setText(msg)
+        except RuntimeError:
+            pass   # dialog closed mid-scan
+
     def _scan(self):
-        devs = scan_cast_devices()
-        if not devs:
-            QMessageBox.information(self, "Scan", "No Cast devices found on the network.")
-            return
-        names = [f"{d['name']}  ({d['addr']})" for d in devs]
-        choice, ok = QInputDialog.getItem(self, "Cast devices", "Add which device?", names, 0, False)
-        if not (ok and choice):
-            return
-        d = devs[names.index(choice)]
-        if not any(t.get("type") == "cast" and t.get("addr") == d["addr"] for t in self.targets):
-            self.targets.append({"type": "cast", "name": d["name"], "addr": d["addr"],
-                                 "cast_port": d.get("cast_port", "8009")})
-        self._refresh()
+        self.b_scan.setEnabled(False)
+        self.tgt_status.setText("🔍 Scanning…")
+        run_async(scan_cast_devices, self._scan_done)
+
+    def _scan_done(self, devs):
+        try:
+            self.b_scan.setEnabled(True)
+            if not isinstance(devs, list):
+                devs = []
+            if not devs:
+                self.tgt_status.setText("No Cast devices found. Is the TV on and on the same Wi-Fi?")
+                return
+            names = [f"{d['name']}  ({d['addr']})" for d in devs]
+            choice, ok = QInputDialog.getItem(self, "Cast devices", "Add which device?", names, 0, False)
+            if not (ok and choice):
+                return
+            d = devs[names.index(choice)]
+            added = self._add_device(d)
+            self._refresh()
+            self.tgt_status.setText(f"Added {d['name']}." if added
+                                    else f"{d['name']} is already in your targets.")
+        except RuntimeError:
+            pass   # dialog closed mid-scan
 
     def _pair(self):
         i = self.tgt_list.currentRow()

@@ -18,9 +18,23 @@ def test_linux_lan_cidr_fallback_to_24():
         assert linux.lan_cidr("192.168.7.9") == "192.168.7.0/24"
 
 
-def test_linux_firewall_cmd():
-    assert linux.firewall_allow_cmd("10.0.0.0/24", 8950) == \
-        "sudo ufw allow from 10.0.0.0/24 to any port 8950 proto tcp"
+def test_linux_firewall_cmd_ufw():
+    with mock.patch.object(linux, "_svc_active", lambda s: s == "ufw"):
+        assert linux.firewall_allow_cmd("10.0.0.0/24", 8950) == \
+            "sudo ufw allow from 10.0.0.0/24 to any port 8950 proto tcp"
+
+
+def test_linux_firewall_cmd_firewalld():
+    with mock.patch.object(linux, "_svc_active", lambda s: s == "firewalld"):
+        cmd = linux.firewall_allow_cmd("10.0.0.0/24", 8950)
+    assert cmd.startswith("sudo firewall-cmd --permanent --add-rich-rule=")
+    assert 'source address="10.0.0.0/24"' in cmd and 'port port="8950"' in cmd
+    assert cmd.endswith("&& sudo firewall-cmd --reload")
+
+
+def test_linux_firewall_cmd_none_when_no_firewall():
+    with mock.patch.object(linux, "_svc_active", lambda s: False):
+        assert linux.firewall_allow_cmd("10.0.0.0/24", 8950) is None
 
 
 def test_linux_config_dir_respects_xdg():

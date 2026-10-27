@@ -7,3 +7,10 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# makepkg build output (in packaging/)
+packaging/vizgui/
+packaging/src/
+packaging/pkg/
+packaging/*.pkg.tar.*
+packaging/*.SRCINFO
