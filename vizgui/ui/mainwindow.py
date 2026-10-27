@@ -1,7 +1,6 @@
-"""The Qt GUI: the painted D-pad, the remote panel, the setup/SMB dialogs, and
-the MainWindow that ties the backends together. The QSS theme lives here too."""
+"""The main window: ties media browsing, casting, transport, polling, the phone
+remote, and status together."""
 import glob
-import math
 import os
 import pty
 import re
@@ -13,269 +12,29 @@ import time
 import urllib.parse
 from functools import partial
 
-from PySide6.QtCore import Qt, QTimer, QDir, QModelIndex, QPointF, QRectF, Signal
-from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QPolygonF, QFont, QPixmap
+from PySide6.QtCore import Qt, QTimer, QDir, QModelIndex
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QWidget, QMainWindow, QLabel, QPushButton, QGridLayout,
-    QVBoxLayout, QHBoxLayout, QFrame, QTreeView, QSplitter, QSizePolicy, QFileSystemModel,
-    QProgressBar, QComboBox, QDialog, QListWidget, QFileDialog, QMessageBox, QInputDialog,
-    QDialogButtonBox, QLineEdit, QCheckBox, QFormLayout,
+    QWidget, QMainWindow, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QFrame, QTreeView, QSplitter, QSizePolicy, QFileSystemModel, QProgressBar, QComboBox,
+    QDialog, QDialogButtonBox, QMessageBox, QCheckBox,
 )
 
-from . import config
-from .config import save_config, load_config, active_cast
-from .paths import GC, CACHE, VIDEO_GLOBS, CASTER_LOG, log
-from .transcode import HAS_NVENC, write_wrapper
-from .smartcast import sc_key, sc_status, KEYS, sc_pair_start, sc_pair_finish
-from .chromecast import gc, scan_cast_devices
-from .vlc import (vlc_cmd, vlc_status, vlc_any_status, mpris_cmd, mpris_running,
-                  path_to_uri, VLC_PORT, VLC_PW)
-from .sources import smb_mount, find_smb_mount, source_path
-from .net import local_ip, lan_cidr
-from .helpers import fmt_time, parse_status
-from .qtasync import run_async
-from .webremote import WebBridge, start_web_server
-
-
-QSS = """
-* { font-family: "Inter", "SF Pro Text", "Segoe UI", "Noto Sans", "DejaVu Sans", sans-serif; }
-QMainWindow, QWidget { background: #0d0f13; color: #e9ebef; font-size: 14px; }
-
-QLabel#title { font-size: 12px; font-weight: 700; color: #7f8794; }
-QLabel#status { color: #8b929e; font-size: 12px; }
-QLabel#now { color: #f2f4f7; font-size: 15px; font-weight: 600; }
-QLabel#dim { color: #6f7682; font-size: 12px; }
-QLabel#tvpill { background: #141821; color: #aab1bd; border: 1px solid #242a33;
-    border-radius: 13px; padding: 6px 14px; font-size: 12px; font-weight: 600; }
-QLabel#badge { background: #e5484d; color: #ffffff; font-size: 10px; font-weight: 800;
-    border-radius: 6px; padding: 3px 8px; }
-
-#card { background: #171a20; border: 1px solid #242a33; border-radius: 16px; }
-#divider { background: #2a313c; }
-
-QPushButton {
-    background: #232832; color: #e9ebef; border: 1px solid #2d343f;
-    border-radius: 11px; padding: 9px 12px; font-size: 14px;
-}
-QPushButton:hover { background: #2c323e; border-color: #3a4250; }
-QPushButton:pressed { background: #353d4b; }
-QPushButton:disabled { color: #565d68; background: #171b22; border-color: #222831; }
-QPushButton.accent { background: #3f7bff; border: 1px solid #5a8dff; color: #ffffff; font-weight: 600; }
-QPushButton.accent:hover { background: #5a8dff; }
-QPushButton.accent:pressed { background: #356bea; }
-
-#remote { border: 1px solid #2a313c; border-radius: 34px;
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1b212b, stop:1 #0f131a); }
-QPushButton.rkey { background: #1b2029; border: 1px solid #2a313c; }
-QPushButton.rkey:hover { background: #262d39; }
-QPushButton.rkey:pressed { background: #313a48; }
-QPushButton#power { background: #e5484d; border: 1px solid #f05b60; color: #ffffff;
-    border-radius: 23px; font-size: 18px; }
-QPushButton#power:hover { background: #f05b60; }
-
-QTreeView, QListWidget {
-    background: #0f1217; border: 1px solid #242a33; border-radius: 12px;
-    padding: 4px; outline: 0;
-}
-QTreeView::item, QListWidget::item { padding: 5px 6px; border-radius: 6px; }
-QTreeView::item:hover, QListWidget::item:hover { background: #191e27; }
-QTreeView::item:selected, QListWidget::item:selected { background: #3f7bff; color: #ffffff; }
-
-QComboBox { background: #232832; border: 1px solid #2d343f; border-radius: 9px;
-    padding: 5px 10px; min-height: 18px; }
-QComboBox:hover { border-color: #3a4250; }
-QComboBox::drop-down { border: 0; width: 18px; }
-QComboBox QAbstractItemView { background: #171a20; border: 1px solid #2d343f;
-    border-radius: 8px; selection-background-color: #3f7bff; outline: 0; padding: 4px; }
-
-QLineEdit { background: #0f1217; border: 1px solid #2d343f; border-radius: 9px;
-    padding: 7px 10px; color: #e9ebef; }
-QLineEdit:focus { border-color: #3f7bff; }
-QCheckBox { spacing: 8px; }
-
-QProgressBar { background: #0f1217; border: none; border-radius: 4px; }
-QProgressBar::chunk { background: #3f7bff; border-radius: 4px; }
-
-QDialog { background: #12151b; }
-QToolTip { background: #171a20; color: #e9ebef; border: 1px solid #2d343f; padding: 4px 6px; }
-
-QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
-QScrollBar::handle:vertical { background: #2d343f; border-radius: 5px; min-height: 28px; }
-QScrollBar::handle:vertical:hover { background: #3a4250; }
-QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
-QScrollBar::handle:horizontal { background: #2d343f; border-radius: 5px; min-width: 28px; }
-QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
-QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
-QSplitter::handle { background: transparent; }
-"""
-
-
-class DPad(QWidget):
-    """A circular navigation clickpad: a ring with ▲▸▼◀ regions and OK in the
-    center, like a streamer remote. Emits pressed(cmd) with up/down/left/right/ok."""
-    pressed = Signal(str)
-
-    def __init__(self, size=150, parent=None):
-        super().__init__(parent)
-        self._size = size
-        self.setFixedSize(size, size)
-        self._active = None
-
-    def _region(self, pos):
-        c = self._size / 2
-        dx, dy = pos.x() - c, pos.y() - c
-        r = math.hypot(dx, dy)
-        if r <= self._size * 0.235:
-            return "ok"
-        if r > self._size * 0.5:
-            return None
-        ang = math.degrees(math.atan2(-dy, dx))   # 0°=right, 90°=up
-        if -45 <= ang < 45:
-            return "right"
-        if 45 <= ang < 135:
-            return "up"
-        if ang >= 135 or ang < -135:
-            return "left"
-        return "down"
-
-    def mousePressEvent(self, e):
-        self._active = self._region(e.position())
-        self.update()
-
-    def mouseReleaseEvent(self, e):
-        reg = self._region(e.position())
-        if reg and reg == self._active:
-            self.pressed.emit(reg)
-        self._active = None
-        self.update()
-
-    def paintEvent(self, e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        s = self._size
-        c = s / 2
-        outer = s * 0.5 - 2
-        inner = s * 0.235
-        # ring
-        p.setPen(QPen(QColor("#2d343f"), 1.5))
-        p.setBrush(QBrush(QColor("#1b212b")))
-        p.drawEllipse(QPointF(c, c), outer, outer)
-        # pressed direction highlight (a 90° wedge)
-        if self._active in ("up", "down", "left", "right"):
-            start = {"right": -45, "up": 45, "left": 135, "down": 225}[self._active]
-            p.setPen(Qt.NoPen)
-            p.setBrush(QBrush(QColor("#2b3340")))
-            p.drawPie(QRectF(c - outer, c - outer, 2 * outer, 2 * outer),
-                      int(start * 16), int(90 * 16))
-        # direction arrows
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#c7ccd4"))
-        mid = (inner + outer) / 2
-        a = s * 0.045
-        p.drawPolygon(QPolygonF([QPointF(c, c - mid - a), QPointF(c - a, c - mid + a), QPointF(c + a, c - mid + a)]))
-        p.drawPolygon(QPolygonF([QPointF(c, c + mid + a), QPointF(c - a, c + mid - a), QPointF(c + a, c + mid - a)]))
-        p.drawPolygon(QPolygonF([QPointF(c - mid - a, c), QPointF(c - mid + a, c - a), QPointF(c - mid + a, c + a)]))
-        p.drawPolygon(QPolygonF([QPointF(c + mid + a, c), QPointF(c + mid - a, c - a), QPointF(c + mid - a, c + a)]))
-        # center OK
-        p.setPen(QPen(QColor("#5a8dff"), 1))
-        p.setBrush(QBrush(QColor("#5a8dff" if self._active == "ok" else "#3f7bff")))
-        p.drawEllipse(QPointF(c, c), inner, inner)
-        p.setPen(QColor("#ffffff"))
-        f = QFont(); f.setBold(True); f.setPointSize(11); p.setFont(f)
-        p.drawText(self.rect(), Qt.AlignCenter, "OK")
-
-
-class RemotePanel(QFrame):
-    def __init__(self, win):
-        super().__init__()
-        self.win = win
-        self.setObjectName("remote")
-        self.setFixedWidth(208)
-        v = QVBoxLayout(self)
-        v.setContentsMargins(20, 20, 20, 18)
-        v.setSpacing(12)
-        self._tv = []   # TV-only widgets, disabled when no SmartCast TV is paired
-
-        def rkey(label, cmd):
-            b = QPushButton(label); b.setProperty("class", "rkey")
-            b.clicked.connect(partial(self.send, cmd))
-            self._tv.append(b)
-            return b
-
-        # power + input
-        top = QHBoxLayout()
-        self.b_power = QPushButton("⏻"); self.b_power.setObjectName("power")
-        self.b_power.setFixedSize(46, 46); self.b_power.setToolTip("Power")
-        self.b_power.clicked.connect(partial(self.send, "power"))
-        self._tv.append(self.b_power)
-        top.addWidget(self.b_power); top.addStretch(1); top.addWidget(rkey("Input", "input"))
-        v.addLayout(top)
-
-        # circular clickpad
-        self.dpad = DPad(146)
-        self.dpad.pressed.connect(self.send)
-        self._tv.append(self.dpad)
-        drow = QHBoxLayout(); drow.addStretch(1); drow.addWidget(self.dpad); drow.addStretch(1)
-        v.addLayout(drow)
-
-        # back / home / menu / exit
-        grid = QGridLayout(); grid.setSpacing(10)
-        for i, (lab, cmd) in enumerate([("Back", "back"), ("Home", "home"),
-                                        ("Menu", "menu"), ("Exit", "exit")]):
-            grid.addWidget(rkey(lab, cmd), i // 2, i % 2)
-        v.addLayout(grid)
-
-        # volume rocker + mute/info
-        volr = QHBoxLayout(); volr.setSpacing(10)
-        volr.addWidget(rkey("Vol −", "voldown")); volr.addWidget(rkey("Vol +", "volup"))
-        v.addLayout(volr)
-        mi = QHBoxLayout(); mi.setSpacing(10)
-        mi.addWidget(rkey("Mute", "mute")); mi.addWidget(rkey("Info", "info"))
-        v.addLayout(mi)
-
-        # ---- media transport (always enabled - drives the cast session) ----
-        div = QFrame(); div.setObjectName("divider"); div.setFixedHeight(1)
-        v.addWidget(div)
-        self.tgt_lbl = QLabel(""); self.tgt_lbl.setObjectName("dim")
-        self.tgt_lbl.setAlignment(Qt.AlignCenter); self.tgt_lbl.setWordWrap(True)
-        v.addWidget(self.tgt_lbl)
-
-        def mbtn(glyph, fn, tip, cls=None):
-            b = QPushButton(glyph); b.setToolTip(tip)
-            if cls:
-                b.setProperty("class", cls)
-            b.clicked.connect(fn)
-            return b
-
-        skip = QHBoxLayout(); skip.setSpacing(10)
-        skip.addWidget(mbtn("⏮", win.go_prev, "Previous"))
-        skip.addWidget(mbtn("⏯", lambda: win._transport(win._t_playpause), "Play / Pause", "accent"))
-        skip.addWidget(mbtn("⏭", win.go_next, "Next"))
-        v.addLayout(skip)
-        tr = QHBoxLayout(); tr.setSpacing(10)
-        tr.addWidget(mbtn("⏪", lambda: win._transport(win._t_rewind), "Back 30s"))
-        tr.addWidget(mbtn("⏹", lambda: win._transport(win._t_stop), "Stop"))
-        tr.addWidget(mbtn("⏩", lambda: win._transport(win._t_forward), "Forward 30s"))
-        v.addLayout(tr)
-
-    def set_tv_enabled(self, on):
-        for w in self._tv:
-            w.setEnabled(on)
-
-    def set_target_label(self, name):
-        self.tgt_lbl.setText(f"▶ playback → {name}")
-
-    def send(self, cmd):
-        def fire():
-            try:
-                r = sc_key(*KEYS[cmd])
-                res = r.get("STATUS", {}).get("RESULT", r) if isinstance(r, dict) else r
-                log.info("key %s %s -> %s", cmd, KEYS[cmd], res)
-                return r
-            except Exception as e:
-                log.warning("key %s %s FAILED: %s", cmd, KEYS[cmd], e)
-                return {"error": str(e)}
-        run_async(fire)
+from .. import config
+from ..config import save_config, load_config
+from ..paths import GC, CACHE, VIDEO_GLOBS, CASTER_LOG, log
+from ..transcode import HAS_NVENC, write_wrapper
+from ..smartcast import sc_status
+from ..chromecast import gc
+from ..vlc import (vlc_cmd, vlc_status, vlc_any_status, mpris_cmd, mpris_running,
+                   path_to_uri, VLC_PORT, VLC_PW)
+from ..sources import source_path
+from ..net import local_ip, lan_cidr
+from ..helpers import fmt_time, parse_status
+from ..qtasync import run_async
+from ..webremote import WebBridge, start_web_server
+from .remote import RemotePanel
+from .dialogs import SetupDialog, SmbDialog
 
 
 class MainWindow(QMainWindow):
@@ -732,11 +491,19 @@ class MainWindow(QMainWindow):
             return
         self.now_title = os.path.basename(path)   # real name, for the display
         vcodec = self._vcodec(path)               # quick probe to choose the path
-        live = (vcodec != "h264")                 # non-H.264 -> live GPU transcode
+        ext = os.path.splitext(path)[1].lower().lstrip(".")
+        # The TV plays H.264 in an mp4-family container directly (no ffmpeg at all).
+        direct = (vcodec == "h264" and ext in ("mp4", "m4v", "mov"))
+        # Otherwise stream live. H.264 just needs a container REMUX (-c:v copy,
+        # near-free); anything else is a real GPU/CPU transcode to H.264. Either
+        # way this avoids go-chromecast's own slow CPU transcode of mkv/etc.
+        copy_video = (vcodec == "h264")
+        live = not direct
         self.now_live = live
         self._casting = True                       # guard polls from clearing state
         self._np_pos = 0; self._np_playing = False
-        verb = "Streaming (transcode)" if live else "Preparing"
+        verb = "Preparing" if direct else ("Remuxing (live)" if copy_video
+                                           else "Streaming (transcode)")
         self.np_title.setText(f"{verb}: {self.now_title}…")
         if live:
             self.np_bar.setRange(0, 0)       # indeterminate; a live stream has no duration
@@ -744,26 +511,27 @@ class MainWindow(QMainWindow):
             self.np_bar.setRange(0, 1000); self.np_bar.setValue(0)
         self.np_time.setText("")
         self.b_cast.setEnabled(False)
-        log.info("CAST requested: %s (vcodec=%s, live=%s)", path, vcodec, live)
+        log.info("CAST requested: %s (vcodec=%s, direct=%s, copy=%s)",
+                 path, vcodec, direct, copy_video)
 
         def do():
             self._kill_caster()                     # drop any server we were running
             gc("stop")                              # end the receiver session cleanly
             time.sleep(1)
             base = [GC, "--addr", config.TV_IP, "--port", config.CAST_PORT]
-            if live:   # local, not self.now_live - a poll must not change our path
-                # Live transcode: go-chromecast runs our wrapper and streams its
-                # stdout to the TV. Instant start, GPU (NVENC) does HEVC->H.264 in
-                # real time, so no buffering and no whole-file wait. The source
-                # path is embedded (shell-quoted) in the wrapper.
-                wrapper = write_wrapper(path)
-                p = self._launch_caster(base + ["transcode", "--content-type",
-                                                "video/mp4", "--command", wrapper])
-                what = f"live transcode ({'nvenc' if HAS_NVENC else 'cpu'})"
-            else:
-                # H.264 plays natively: serve the file directly via a symlink.
+            if direct:
+                # H.264 mp4: serve the file directly via a symlink (no ffmpeg).
                 p = self._launch_caster(base + ["load", self._symlink_serve(path)])
                 what = "direct"
+            else:
+                # Live stream: go-chromecast runs our wrapper and streams its stdout
+                # to the TV. Instant start, no buffering. copy_video = a free remux
+                # (H.264 mkv), else NVENC/libx264 transcode (HEVC etc).
+                wrapper = write_wrapper(path, copy_video=copy_video)
+                p = self._launch_caster(base + ["transcode", "--content-type",
+                                                "video/mp4", "--command", wrapper])
+                what = ("live remux" if copy_video
+                        else f"live transcode ({'nvenc' if HAS_NVENC else 'cpu'})")
             time.sleep(5)                           # let it establish + the TV start
             alive = p.poll() is None
             log.info("caster pid=%s alive=%s (%s)", p.pid, alive, what)
@@ -1067,252 +835,3 @@ class MainWindow(QMainWindow):
             else:
                 self._np_pos += 1
             self._render_np()
-
-
-class SmbDialog(QDialog):
-    """Collect SMB share details; result() returns a source config entry."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Add SMB share")
-        form = QFormLayout(self)
-        self.server = QLineEdit(); self.server.setPlaceholderText("nas.local or 192.168.1.50")
-        self.share = QLineEdit(); self.share.setPlaceholderText("media")
-        self.name = QLineEdit(); self.name.setPlaceholderText("(defaults to the share name)")
-        self.user = QLineEdit()
-        self.domain = QLineEdit(); self.domain.setPlaceholderText("(usually blank)")
-        self.password = QLineEdit(); self.password.setEchoMode(QLineEdit.Password)
-        self.guest = QCheckBox("Connect as guest (no login)")
-        self.guest.toggled.connect(lambda on: [w.setEnabled(not on) for w in
-                                               (self.user, self.domain, self.password)])
-        form.addRow("Server:", self.server)
-        form.addRow("Share:", self.share)
-        form.addRow("Name:", self.name)
-        form.addRow("Username:", self.user)
-        form.addRow("Domain:", self.domain)
-        form.addRow("Password:", self.password)
-        form.addRow("", self.guest)
-        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
-        form.addRow(bb)
-
-    def result_source(self):
-        server = self.server.text().strip()
-        share = self.share.text().strip()
-        if not server or not share:
-            return None
-        smb = {"server": server, "share": share, "guest": self.guest.isChecked(),
-               "user": self.user.text().strip(), "domain": self.domain.text().strip(),
-               "password": self.password.text()}
-        return {"name": self.name.text().strip() or share, "kind": "smb", "smb": smb}
-
-
-class SetupDialog(QDialog):
-    """Configure media sources and cast/playback targets, saved to config.json."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.win = parent
-        self.setWindowTitle("viz-gui Setup")
-        self.resize(580, 560)
-        self.sources = [dict(s) for s in config.CFG.get("sources", [])]
-        self.targets = [dict(t) for t in config.CFG.get("targets", [])]
-        self.web = dict(config.CFG.get("web", {"enabled": True, "port": 8950}))
-        lay = QVBoxLayout(self)
-
-        lay.addWidget(QLabel("Media sources (folders / NAS mounts)"))
-        self.src_list = QListWidget(); lay.addWidget(self.src_list)
-        sb = QHBoxLayout()
-        b_add = QPushButton("Add folder…"); b_add.clicked.connect(self._add_source)
-        b_smb = QPushButton("Add SMB share…"); b_smb.clicked.connect(self._add_smb)
-        b_rms = QPushButton("Remove"); b_rms.clicked.connect(self._rm_source)
-        sb.addWidget(b_add); sb.addWidget(b_smb); sb.addWidget(b_rms); sb.addStretch(1)
-        lay.addLayout(sb)
-        hint = QLabel("A folder is any local path or already-mounted drive. "
-                      "Add SMB share connects to a NAS over the network (no mounting needed).")
-        hint.setObjectName("status"); hint.setWordWrap(True); lay.addWidget(hint)
-
-        lay.addWidget(QLabel("Cast / playback targets"))
-        self.tgt_list = QListWidget(); lay.addWidget(self.tgt_list)
-        tb = QHBoxLayout()
-        b_scan = QPushButton("Scan for Cast devices"); b_scan.clicked.connect(self._scan)
-        b_pair = QPushButton("Pair SmartCast…"); b_pair.clicked.connect(self._pair)
-        b_vlc = QPushButton("Add local VLC"); b_vlc.clicked.connect(self._add_vlc)
-        b_rmt = QPushButton("Remove"); b_rmt.clicked.connect(self._rm_target)
-        for b in (b_scan, b_pair, b_vlc, b_rmt):
-            tb.addWidget(b)
-        lay.addLayout(tb)
-
-        lay.addWidget(QLabel("Phone remote (control from a phone's browser)"))
-        self.web_enabled = QCheckBox("Enable — serves a remote page any phone on your Wi-Fi can open")
-        self.web_enabled.setChecked(bool(self.web.get("enabled", True)))
-        pr = QHBoxLayout()
-        pr.addWidget(QLabel("Port:"))
-        self.web_port = QLineEdit(str(self.web.get("port", 8950))); self.web_port.setMaximumWidth(90)
-        pr.addWidget(self.web_port)
-        self.web_url = QLabel(); self.web_url.setObjectName("dim")
-        pr.addWidget(self.web_url, 1)
-        lay.addWidget(self.web_enabled)
-        lay.addLayout(pr)
-        fwhint = QLabel("Your firewall blocks this by default. Run this once in a terminal "
-                        "to allow only your home network (changes apply when you restart viz-gui):")
-        fwhint.setObjectName("status"); fwhint.setWordWrap(True); lay.addWidget(fwhint)
-        self.web_cmd = QLineEdit(); self.web_cmd.setReadOnly(True); lay.addWidget(self.web_cmd)
-        self.web_port.textChanged.connect(self._upd_web)
-        self._upd_web()
-
-        # pairing controls (operate on live config immediately)
-        pairrow = QHBoxLayout()
-        self.pin_lbl = QLabel()
-        # fix the width (to the revealed text) so the eye button doesn't shift
-        # when the PIN is shown/hidden mid-hold
-        self.pin_lbl.setFixedWidth(self.pin_lbl.fontMetrics().horizontalAdvance("Pairing PIN:  000000") + 12)
-        self.b_eye = QPushButton("👁"); self.b_eye.setFixedWidth(40)
-        self.b_eye.setToolTip("Hold to reveal the PIN")
-        self.b_eye.pressed.connect(lambda: self._refresh_pin(reveal=True))
-        self.b_eye.released.connect(lambda: self._refresh_pin(reveal=False))
-        b_qr = QPushButton("Pair phone (QR)…"); b_qr.clicked.connect(self._pair_qr)
-        b_new = QPushButton("New PIN & QR"); b_new.clicked.connect(self._new_pairing)
-        b_new.setToolTip("Fresh PIN and QR — un-pairs all currently paired phones")
-        pairrow.addWidget(self.pin_lbl); pairrow.addWidget(self.b_eye); pairrow.addStretch(1)
-        pairrow.addWidget(b_qr); pairrow.addWidget(b_new)
-        lay.addLayout(pairrow)
-        self._refresh_pin()
-
-        bb = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        bb.accepted.connect(self._save); bb.rejected.connect(self.reject)
-        lay.addWidget(bb)
-        self._refresh()
-
-    def _upd_web(self):
-        port = (self.web_port.text().strip() or "8950")
-        self.web_url.setText(f"→  http://{local_ip()}:{port}")
-        self.web_cmd.setText(f"sudo ufw allow from {lan_cidr()} to any port {port} proto tcp")
-
-    def _refresh_pin(self, reveal=False):
-        pin = config.CFG.get("web", {}).get("pin", "------") if reveal else "••••••"
-        self.pin_lbl.setText(f"Pairing PIN:  {pin}")
-
-    def _new_pairing(self):
-        if not self.win:
-            return
-        if QMessageBox.question(self, "New PIN & QR",
-                "Generate a fresh PIN and QR?\n\nThis un-pairs every phone that's "
-                "currently connected — they'll each need to scan or enter the new code "
-                "again.") == QMessageBox.Yes:
-            self.win.new_pairing()
-            self._refresh_pin()
-
-    def _pair_qr(self):
-        if self.win:
-            self.win.show_pair_qr()
-
-    def _refresh(self):
-        self.src_list.clear()
-        for s in self.sources:
-            if s.get("kind") == "smb":
-                sm = s.get("smb", {})
-                self.src_list.addItem(f"{s.get('name','?')}   —   smb://{sm.get('server','')}/{sm.get('share','')}")
-            else:
-                self.src_list.addItem(f"{s.get('name','?')}   —   {s.get('path','')}")
-        self.tgt_list.clear()
-        for t in self.targets:
-            if t.get("type") == "cast":
-                extra = "   [paired]" if t.get("auth_token") else ""
-                self.tgt_list.addItem(f"Cast:  {t.get('name','?')}  ({t.get('addr','')}){extra}")
-            else:
-                self.tgt_list.addItem(f"VLC:  {t.get('name','this PC')}")
-
-    def _add_source(self):
-        d = QFileDialog.getExistingDirectory(self, "Choose a media folder", os.path.expanduser("~"))
-        if not d:
-            return
-        name, ok = QInputDialog.getText(self, "Source name", "Name:", text=os.path.basename(d) or d)
-        self.sources.append({"name": name if (ok and name) else (os.path.basename(d) or d), "path": d})
-        self._refresh()
-
-    def _add_smb(self):
-        dlg = SmbDialog(self)
-        if dlg.exec():
-            src = dlg.result_source()
-            if not src:
-                QMessageBox.information(self, "SMB", "Server and share are required.")
-                return
-            # try connecting now so the user gets immediate feedback
-            try:
-                smb_mount(**{k: src["smb"].get(k, "") for k in
-                             ("server", "share", "user", "domain", "password")},
-                          guest=src["smb"].get("guest", False))
-            except Exception as e:
-                if QMessageBox.question(self, "SMB",
-                        f"Couldn't connect now:\n{e}\n\nSave the share anyway?") != QMessageBox.Yes:
-                    return
-            self.sources.append(src)
-            self._refresh()
-
-    def _rm_source(self):
-        i = self.src_list.currentRow()
-        if 0 <= i < len(self.sources):
-            del self.sources[i]; self._refresh()
-
-    def _scan(self):
-        devs = scan_cast_devices()
-        if not devs:
-            QMessageBox.information(self, "Scan", "No Cast devices found on the network.")
-            return
-        names = [f"{d['name']}  ({d['addr']})" for d in devs]
-        choice, ok = QInputDialog.getItem(self, "Cast devices", "Add which device?", names, 0, False)
-        if not (ok and choice):
-            return
-        d = devs[names.index(choice)]
-        if not any(t.get("type") == "cast" and t.get("addr") == d["addr"] for t in self.targets):
-            self.targets.append({"type": "cast", "name": d["name"], "addr": d["addr"],
-                                 "cast_port": d.get("cast_port", "8009")})
-        self._refresh()
-
-    def _pair(self):
-        i = self.tgt_list.currentRow()
-        if not (0 <= i < len(self.targets)) or self.targets[i].get("type") != "cast":
-            QMessageBox.information(self, "Pair", "Select a Cast target first (a SmartCast TV).")
-            return
-        t = self.targets[i]
-        port, ok = QInputDialog.getText(self, "SmartCast port", "SmartCast API port:", text="7345")
-        if not ok:
-            return
-        try:
-            req_token, challenge = sc_pair_start(t["addr"], port)
-        except Exception as e:
-            QMessageBox.warning(self, "Pair", "Could not start pairing (is it a SmartCast TV?):\n" + str(e))
-            return
-        code, ok = QInputDialog.getText(self, "Pairing code", "Enter the code shown on the TV:")
-        if not (ok and code):
-            return
-        try:
-            tok = sc_pair_finish(t["addr"], port, req_token, code, challenge)
-        except Exception as e:
-            QMessageBox.warning(self, "Pair", "Pairing failed:\n" + str(e))
-            return
-        t["smartcast_host"] = f"{t['addr']}:{port}"; t["auth_token"] = tok
-        QMessageBox.information(self, "Pair", "Paired — remote control enabled for this TV.")
-        self._refresh()
-
-    def _add_vlc(self):
-        if not any(x.get("type") == "vlc" for x in self.targets):
-            self.targets.append({"type": "vlc", "name": "VLC (this PC)"})
-        self._refresh()
-
-    def _rm_target(self):
-        i = self.tgt_list.currentRow()
-        if 0 <= i < len(self.targets):
-            del self.targets[i]; self._refresh()
-
-    def _save(self):
-        try:
-            port = int(self.web_port.text())
-        except ValueError:
-            port = 8950
-        try:
-            save_config({"sources": self.sources, "targets": self.targets,
-                         "web": {"enabled": self.web_enabled.isChecked(), "port": port}})
-        except Exception as e:
-            QMessageBox.warning(self, "Save", "Could not save config:\n" + str(e))
-            return
-        self.accept()

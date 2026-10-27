@@ -18,14 +18,21 @@ def _has_nvenc():
 HAS_NVENC = _has_nvenc()   # use the GPU when available, else fall back to libx264
 
 
-def write_wrapper(path):
+def write_wrapper(path, copy_video=False):
     """Write the transcode helper go-chromecast runs for live streaming. The
     source path is embedded (shell-quoted, so spaces/+/() are safe) and the helper
-    streams H.264 + stereo AAC as fragmented mp4 to stdout. NVENC if available,
-    else libx264. Returns the script path. go-chromecast splits --command on
-    spaces, so the script path must contain none (it lives under ~/.cache)."""
+    streams the video + stereo AAC as fragmented mp4 to stdout. Returns the script
+    path (space-free, under ~/.cache, since go-chromecast splits --command on spaces).
+
+    copy_video=True: the video is already H.264, so just repackage it (``-c:v copy``)
+    - a near-free live REMUX (no re-encode, no quality loss). Used for H.264 in a
+    container go-chromecast can't serve directly (e.g. mkv), to avoid go-chromecast's
+    own slow CPU transcode. Otherwise re-encode to H.264 via NVENC (or libx264)."""
     q = shlex.quote(os.path.abspath(path))
-    if HAS_NVENC:
+    if copy_video:
+        vin = f"-i {q}"
+        venc = "-c:v copy"
+    elif HAS_NVENC:
         vin = f"-hwaccel cuda -i {q}"
         venc = ("-c:v h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 0 "
                 "-maxrate 12M -bufsize 24M -g 48 -bf 0")
