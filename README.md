@@ -25,10 +25,11 @@ first-run setup wizard. A single-user desktop app (PySide6/Qt).
   your TV, seeds your media folders on first run, and shows the firewall command
   matching your firewall — no config files to edit by hand.
 
-## Install (CachyOS / Arch)
+## Install (Linux)
 
-One command installs the dependencies, the go-chromecast binary, the app, a
-`viz-gui` launcher, and an app-menu entry:
+Works on **Arch, Debian/Ubuntu, and Fedora** — the installer detects
+`pacman` / `apt` / `dnf`. One command installs the dependencies, the
+go-chromecast binary, the app, a `viz-gui` launcher, and an app-menu entry:
 
 ```
 bash <(curl -fsSL https://raw.githubusercontent.com/jm12460/VizGui/main/install.sh)
@@ -44,11 +45,16 @@ bash ~/Projects/vizgui/install.sh
 Then launch **vizgui** from your app menu (or run `viz-gui`). First run seeds your
 media folders and opens the setup wizard, which auto-discovers your TV.
 
-### Dependencies (other distros)
-`python`, `PySide6`, `ffmpeg`, `vlc`, `playerctl`, `gvfs`/`gvfs-smb` (for SMB),
+On **Fedora**, VLC and the full ffmpeg build live in [RPM Fusion](https://rpmfusion.org/)
+(the installer notes this); enable it and `sudo dnf install vlc ffmpeg` for the VLC
+target and all codecs.
+
+### Other distros / manual
+Install `python3`, `PySide6`, `ffmpeg`, `vlc`, `playerctl`, `gvfs` (SMB backend),
 `qrencode` (optional, for the pairing QR), plus the
 [`go-chromecast`](https://github.com/vishen/go-chromecast) binary on your `PATH`.
-Then `python -m vizgui` from the source tree. Missing tools are reported in-app.
+Then `pipx install git+https://github.com/jm12460/VizGui.git`, or run
+`python -m vizgui` from a clone. Missing tools are reported in-app.
 
 ## Platform support
 Linux only for now. OS-specific behavior (data paths, SMB mounting, process

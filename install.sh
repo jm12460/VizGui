@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vizgui installer for CachyOS / Arch-based systems.
+# vizgui installer for Linux (Arch, Debian/Ubuntu, Fedora).
 # Installs dependencies, the go-chromecast binary (not in the repos), the app,
 # a `viz-gui` launcher, and an app-menu entry. Safe to re-run (idempotent).
 #
@@ -16,14 +16,30 @@ APPS="$HOME/.local/share/applications"
 
 say() { printf '\n\033[1;36m==>\033[0m %s\n' "$*"; }
 
-if ! command -v pacman >/dev/null 2>&1; then
-    echo "This installer is for Arch-based systems (pacman not found)." >&2
+say "Installing dependencies (you'll be asked for your password)..."
+if command -v pacman >/dev/null 2>&1; then
+    sudo pacman -S --needed --noconfirm \
+        python pyside6 ffmpeg vlc playerctl gvfs-smb qrencode git curl
+elif command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install -y \
+        python3 python3-pyside6 ffmpeg vlc playerctl gvfs-backends qrencode git curl
+elif command -v dnf >/dev/null 2>&1; then
+    # vlc and the full ffmpeg build live in RPM Fusion on Fedora; install what's in
+    # the default repos and let the user add the rest if they want the VLC target.
+    sudo dnf install -y \
+        python3 python3-pyside6 ffmpeg-free playerctl gvfs-smb qrencode git curl || true
+    if ! command -v vlc >/dev/null 2>&1; then
+        printf '\n\033[1;33mNote:\033[0m VLC (and the full ffmpeg build for some codecs) are in RPM Fusion.\n'
+        printf '      To use the VLC target / all codecs: enable https://rpmfusion.org then\n'
+        printf '      sudo dnf install vlc ffmpeg\n'
+    fi
+else
+    echo "No supported package manager found (need pacman, apt, or dnf)." >&2
+    echo "Install these manually, then re-run or use 'python -m vizgui':" >&2
+    echo "  python3, PySide6, ffmpeg, vlc, playerctl, gvfs (smb backend), qrencode, git, curl" >&2
     exit 1
 fi
-
-say "Installing dependencies (you'll be asked for your password)..."
-sudo pacman -S --needed --noconfirm \
-    python pyside6 ffmpeg vlc playerctl gvfs-smb qrencode git curl
 
 say "Setting up go-chromecast (casting to the TV)..."
 mkdir -p "$BIN"
@@ -84,4 +100,4 @@ case ":$PATH:" in
 esac
 
 say "Done! Launch 'vizgui' from your app menu, or run: viz-gui"
-echo "    First run opens a setup wizard - add your media source and scan for your TV."
+echo "    First run seeds your media folders and opens a wizard that finds your TV."
