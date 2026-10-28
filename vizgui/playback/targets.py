@@ -16,8 +16,8 @@ from ..paths import GC, CACHE, CASTER_LOG, log
 from ..chromecast import gc
 from ..transcode import write_wrapper, prepare_subtitle, HAS_HW
 from ..helpers import cast_plan, parse_status
-from ..vlc import (vlc_cmd, vlc_status, vlc_any_status, mpris_cmd, mpris_running,
-                   path_to_uri, VLC_PORT, VLC_PW)
+from ..vlc import (vlc_cmd, vlc_status, vlc_any_status, vlc_playlist_path,
+                   mpris_cmd, mpris_running, path_to_uri, VLC_PORT, VLC_PW)
 from . import media
 from .base import PlaybackTarget
 
@@ -249,6 +249,9 @@ class VlcTarget(PlaybackTarget):
             if "error" in s:
                 return {"idle": True, "busy": True}   # transient hiccup, not ended
             self.mode = "http"
+            # map the current playlist item back to its real path so the app tracks
+            # which file is playing after a native Next/Prev (for Continue-watching)
+            s["path"] = vlc_playlist_path() or s.get("path", "")
         else:
             s = vlc_any_status()
             if not isinstance(s, dict) or "error" in s:

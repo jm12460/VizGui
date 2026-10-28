@@ -3,7 +3,7 @@
 # vizgui: stable release, built from the tagged source tarball.
 # For the rolling build from the main branch see ../vizgui-git.
 pkgname=vizgui
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Cast local media to a SmartCast TV / Chromecast or VLC, with a remote, a phone web-remote, live transcoding, and SMB sources"
 arch=('any')
@@ -21,7 +21,8 @@ depends=(
 )
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/jm12460/VizGui/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('c39a2d5b34f1cba437234b04373cce4c70bfa05f34482dd2fdec3be0a72843c3')
+# Regenerate after the v0.3.0 tag exists: `updpkgsums` (or makepkg -g).
+sha256sums=('SKIP')
 
 build() {
     cd "$srcdir/VizGui-$pkgver"

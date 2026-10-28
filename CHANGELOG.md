@@ -6,6 +6,31 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-28
+
+### Added
+- **Media search** — a search box in both the desktop browser and the phone
+  Browse tab finds videos anywhere under a source, no clicking through folders.
+  Words match independently (so "family guy pilot" narrows), and a matching
+  folder is returned as one entry you open rather than listing every file inside
+  it.
+
+### Fixed
+- VLC now applies the chosen audio/subtitle track when reusing an already-open
+  VLC, not only on a fresh launch.
+- Sidecar-subtitle matching no longer grabs a similarly-named file (e.g.
+  `Aliens.srt` was picked up for `Alien.mkv`).
+- A failed subtitle conversion no longer leaves a stale subtitle to be burned in.
+- **Security:** the phone remote can only cast files inside a configured source;
+  a paired device can no longer request arbitrary local paths.
+- A corrupted/unreadable `config.json` is backed up (to `config.json.corrupt`)
+  instead of being silently overwritten — preserving SMB passwords and phone
+  pairings. Only a genuinely missing config starts the first-run wizard.
+- The phone status snapshot no longer reads a Qt widget off the HTTP thread.
+- Continue-watching now records against the right file when VLC advances to the
+  next episode (via the app's Next or VLC's own controls); the app reads the
+  current item's path from VLC's playlist instead of only its filename.
+
 ## [0.2.0] - 2026-10-27
 
 ### Added
@@ -73,6 +98,7 @@ First tagged release.
   are additive rather than rewrites.
 - Pure-logic test suite (85 tests, no GUI/network/hardware).
 
-[Unreleased]: https://github.com/jm12460/VizGui/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jm12460/VizGui/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jm12460/VizGui/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jm12460/VizGui/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jm12460/VizGui/releases/tag/v0.1.0

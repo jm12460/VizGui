@@ -17,15 +17,40 @@ from . import platforms
 VLC_PORT = 9099
 VLC_PW = "vizgui"
 VLC_URL = f"http://127.0.0.1:{VLC_PORT}/requests/status.xml"
+VLC_PLAYLIST_URL = f"http://127.0.0.1:{VLC_PORT}/requests/playlist.xml"
 _VLC_AUTH = "Basic " + base64.b64encode(f":{VLC_PW}".encode()).decode()
 
 
 # ---- HTTP interface (a VLC we launched) ----
-def vlc_req(params=""):
-    url = VLC_URL + (("?" + params) if params else "")
+def _vlc_get(url):
     r = urllib.request.Request(url, headers={"Authorization": _VLC_AUTH})
     with urllib.request.urlopen(r, timeout=4) as resp:
         return resp.read().decode("utf-8", "replace")
+
+
+def vlc_req(params=""):
+    return _vlc_get(VLC_URL + (("?" + params) if params else ""))
+
+
+def _xml_unescape(s):
+    return (s.replace("&amp;", "&").replace("&lt;", "<")
+             .replace("&gt;", ">").replace("&quot;", '"').replace("&#39;", "'"))
+
+
+def vlc_playlist_path():
+    """Full filesystem path of the item VLC is currently playing, read from the
+    HTTP playlist (the status feed only gives a bare filename). This lets the app
+    track which file is playing after a native skip, so Continue-watching records
+    against the right file. -> path, or '' if it can't be determined."""
+    try:
+        xml = _vlc_get(VLC_PLAYLIST_URL)
+    except Exception:
+        return ""
+    leaf = re.search(r'<leaf\b[^>]*\bcurrent="current"[^>]*>', xml)
+    if not leaf:
+        return ""
+    uri = re.search(r'\buri="([^"]*)"', leaf.group(0))
+    return uri_to_path(_xml_unescape(uri.group(1))) if uri else ""
 
 
 def vlc_cmd(command):

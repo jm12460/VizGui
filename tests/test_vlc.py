@@ -70,3 +70,23 @@ def test_vlc_any_status_skips_mpris_when_unsupported():
         s = vlc.vlc_any_status()
     assert "error" in s
     mp.assert_not_called()
+
+
+def test_vlc_playlist_path_current_leaf():
+    xml = ('<node id="1" name="Playlist">'
+           '<leaf id="4" uri="file:///mnt/media/Show/ep1.mkv" name="ep1.mkv"/>'
+           '<leaf id="5" uri="file:///mnt/media/Show/ep2%20two.mkv" current="current" name="ep2 two.mkv"/>'
+           '</node>')
+    with mock.patch.object(vlc, "_vlc_get", return_value=xml):
+        assert vlc.vlc_playlist_path() == "/mnt/media/Show/ep2 two.mkv"
+
+
+def test_vlc_playlist_path_none_current():
+    xml = '<node><leaf id="4" uri="file:///a/b.mkv" name="b.mkv"/></node>'
+    with mock.patch.object(vlc, "_vlc_get", return_value=xml):
+        assert vlc.vlc_playlist_path() == ""
+
+
+def test_vlc_playlist_path_fetch_error():
+    with mock.patch.object(vlc, "_vlc_get", side_effect=OSError("no vlc")):
+        assert vlc.vlc_playlist_path() == ""
