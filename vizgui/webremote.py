@@ -126,6 +126,26 @@ def web_browse(src_idx, sub):
     return {"ok": True, "src": src_idx, "sub": sub, "up": up, "entries": entries}
 
 
+def web_path_ok(path):
+    """True if `path` is a real file inside one of the configured source roots.
+    A paired phone can POST any path to the cast action, so confine it the same
+    way web_browse confines listing - a client must not cast arbitrary local files.
+    SMB roots that can't be resolved (unmounted/offline) simply don't match."""
+    if not path:
+        return False
+    tgt = os.path.realpath(path)
+    if not os.path.isfile(tgt):
+        return False
+    for s in config.CFG.get("sources", []):
+        try:
+            root = os.path.realpath(source_path(s))
+        except Exception:
+            continue
+        if root and (tgt == root or tgt.startswith(root + os.sep)):
+            return True
+    return False
+
+
 class WebBridge(QObject):
     do = Signal(str, object)
 

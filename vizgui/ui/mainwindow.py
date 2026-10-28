@@ -23,7 +23,7 @@ from ..sources import source_path
 from ..net import local_ip, lan_cidr
 from ..helpers import fmt_time
 from ..qtasync import run_async
-from ..webremote import WebBridge, start_web_server
+from ..webremote import WebBridge, start_web_server, web_path_ok
 from ..playback import CastTarget, VlcTarget
 from ..playback import media
 from .remote import RemotePanel
@@ -140,6 +140,9 @@ class MainWindow(QMainWindow):
         self.b_cast.clicked.connect(self.cast_selected)
         self.target_box = QComboBox()
         self._reload_targets()
+        # Plain mirror of the selected target index, so the HTTP thread's web_status
+        # never touches the QComboBox off the GUI thread. Kept current in _target_changed.
+        self._web_target_index = self.target_box.currentIndex()
         self.target_box.currentIndexChanged.connect(self._target_changed)
         # sync the active target to the configured selection, so a VLC-only setup
         # doesn't leave 'cast' active and poll go-chromecast with no device
@@ -316,6 +319,7 @@ class MainWindow(QMainWindow):
         self.target_box.blockSignals(False)
 
     def _target_changed(self, idx):
+        self._web_target_index = idx   # GUI-thread cache the web status reads
         t = self.target_box.currentData()
         if not t:
             return
@@ -723,7 +727,7 @@ class MainWindow(QMainWindow):
                    for i, s in enumerate(config.CFG.get("sources", []))]
         return {
             "ok": True,
-            "target_index": self.target_box.currentIndex(),
+            "target_index": self._web_target_index,
             "targets": targets,
             "sources": sources,
             "auto_next": self.auto_next,
@@ -781,8 +785,11 @@ class MainWindow(QMainWindow):
                 self.autonext_cb.setChecked(bool(p.get("on")))
             elif kind == "cast":
                 path = p.get("path", "")
-                if os.path.isfile(path) and path.lower().endswith(tuple(g[1:] for g in VIDEO_GLOBS)):
+                if (path.lower().endswith(tuple(g[1:] for g in VIDEO_GLOBS))
+                        and web_path_ok(path)):
                     self._cast(path, int(p.get("resume", 0) or 0))
+                else:
+                    log.warning("web cast refused (outside sources): %s", path)
             elif kind == "forget":
                 history.forget(p.get("path", ""))
             elif kind == "clear":

@@ -142,12 +142,33 @@ class VlcTarget(PlaybackTarget):
         over HTTP and must not flip to MPRIS on a transient HTTP hiccup)."""
         return self.proc is not None and self.proc.poll() is None
 
+    @staticmethod
+    def _item_opts(audio, sub):
+        """Per-item VLC MRL options (the `:opt=val` form) for a chosen audio/sub
+        track. Same option names as the launch flags, so a reused VLC applies the
+        selection exactly as a freshly-launched one does."""
+        opts = []
+        if audio is not None:
+            opts.append(f":audio-track={int(audio)}")
+        if sub:
+            if sub.get("external"):
+                opts.append(f":sub-file={sub['external']}")
+            elif sub.get("si") is not None:
+                opts.append(f":sub-track={int(sub['si'])}")
+        return opts
+
     def start(self, path, items, auto_next, resume=0, audio=None, sub=None):
         # 1) Reuse our own HTTP VLC (preferred) -> send the folder as a native playlist.
         if self._own() or "error" not in vlc_status():
             self.mode = "http"
             vlc_cmd("pl_empty")
-            vlc_cmd("in_play&input=" + urllib.parse.quote(items[0]))
+            # audio/sub ride along as per-item options on the first item, so reuse
+            # honors the selection instead of ignoring it (the launch path applies
+            # the same options via --audio-track/--sub-file/--sub-track).
+            play = "in_play&input=" + urllib.parse.quote(items[0])
+            for opt in self._item_opts(audio, sub):
+                play += "&option=" + urllib.parse.quote(opt)
+            vlc_cmd(play)
             for it in items[1:]:
                 vlc_cmd("in_enqueue&input=" + urllib.parse.quote(it))
             if resume:

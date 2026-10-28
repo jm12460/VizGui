@@ -80,7 +80,12 @@ def _external_subs(path, start_i, listdir):
     except OSError:
         return []
     for nm in sorted(names):
-        if os.path.splitext(nm)[1].lower() in SUB_EXTS and nm.lower().startswith(stem):
+        if os.path.splitext(nm)[1].lower() not in SUB_EXTS:
+            continue
+        # match the exact stem or "<stem><sep>..." (e.g. Show.en.srt) — NOT any
+        # file that merely begins with the stem (Alien.mkv must not grab Aliens.srt)
+        sub_stem = os.path.splitext(nm)[0].lower()
+        if sub_stem == stem or sub_stem.startswith((stem + ".", stem + "_", stem + "-")):
             out.append({"i": start_i + len(out), "si": None, "stream": None, "label": nm,
                         "codec": os.path.splitext(nm)[1].lstrip("."), "kind": "text",
                         "external": os.path.join(folder, nm), "default": False, "forced": False})

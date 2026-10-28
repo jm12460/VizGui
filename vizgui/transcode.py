@@ -23,6 +23,11 @@ def prepare_subtitle(media_path, sub):
     if sub.get("kind") == "image" and sub.get("si") is not None:
         return {"kind": "image", "si": int(sub["si"])}
     try:
+        if os.path.exists(_SUB_FILE):
+            os.remove(_SUB_FILE)          # never reuse a stale sub if this fails
+    except OSError:
+        pass
+    try:
         ff = platforms.find_tool("ffmpeg")
         if sub.get("external"):
             cmd = [ff, "-y", "-i", sub["external"], _SUB_FILE]
@@ -30,9 +35,11 @@ def prepare_subtitle(media_path, sub):
             cmd = [ff, "-y", "-i", media_path, "-map", f"0:s:{int(sub['si'])}", _SUB_FILE]
         else:
             return None
-        subprocess.run(cmd, capture_output=True, timeout=120)
-        if os.path.isfile(_SUB_FILE) and os.path.getsize(_SUB_FILE) > 0:
+        r = subprocess.run(cmd, capture_output=True, timeout=120)
+        if r.returncode == 0 and os.path.isfile(_SUB_FILE) and os.path.getsize(_SUB_FILE) > 0:
             return {"kind": "text", "file": _SUB_FILE}
+        log.warning("subtitle prep failed (rc=%s): %s", r.returncode,
+                    r.stderr.decode("utf-8", "replace")[-200:] if r.stderr else "")
     except Exception as e:
         log.warning("subtitle prep failed: %s", e)
     return None

@@ -88,3 +88,20 @@ def test_load_config_existing_file_not_fresh():
             config.save_config({"sources": [], "targets": [], "web": {"port": 8950}})
             config.load_config()
             assert config.FRESH_INSTALL is False   # existing config -> no wizard
+
+
+def test_load_config_corrupt_file_backed_up_not_wiped():
+    with tempfile.TemporaryDirectory() as d:
+        cfgpath = os.path.join(d, "config.json")
+        with open(cfgpath, "w") as f:
+            f.write("{not valid json,,,")     # corruption / bad manual edit
+        with mock.patch.object(config, "CONFIG_DIR", d), \
+             mock.patch.object(config, "CONFIG_PATH", cfgpath):
+            loaded = config.load_config()
+            # the unreadable config is preserved, not silently overwritten...
+            assert os.path.isfile(cfgpath + ".corrupt")
+            with open(cfgpath + ".corrupt") as f:
+                assert f.read() == "{not valid json,,,"
+            # ...and it's NOT treated as a first run (would re-open the wizard)
+            assert config.FRESH_INSTALL is False
+    assert any(t["type"] == "vlc" for t in loaded["targets"])   # usable defaults

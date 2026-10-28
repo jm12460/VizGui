@@ -45,6 +45,13 @@ def test_external_subs_discovered():
     assert all(x["external"] for x in s)
 
 
+def test_external_subs_no_prefix_false_positive():
+    # Alien.mkv must match Alien.srt / Alien.en.srt but NOT Aliens.srt
+    files = ["Alien.mkv", "Alien.srt", "Alien.en.srt", "Aliens.srt", "Alien3.srt"]
+    s = probe.parse({"streams": []}, path="/m/Alien.mkv", listdir=lambda d: files)["subs"]
+    assert [x["label"] for x in s] == ["Alien.en.srt", "Alien.srt"]
+
+
 def test_parse_empty_on_no_data():
     assert probe.parse({}) == {"audio": [], "subs": [], "chapters": []}
 

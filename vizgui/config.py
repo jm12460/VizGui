@@ -70,8 +70,19 @@ def load_config():
             except Exception:
                 pass
         return cfg
-    except Exception:
-        FRESH_INSTALL = True
+    except Exception as e:
+        # A present-but-unreadable config (corruption, bad manual edit) must NOT be
+        # silently overwritten — it holds SMB passwords and phone-remote pairings.
+        # Back it up and start fresh; only a genuinely missing file is "first run".
+        if os.path.isfile(CONFIG_PATH):
+            try:
+                os.replace(CONFIG_PATH, CONFIG_PATH + ".corrupt")
+                log.warning("config.json unreadable (%s); backed up to config.json.corrupt", e)
+            except OSError:
+                pass
+            FRESH_INSTALL = False
+        else:
+            FRESH_INSTALL = True
         cfg = _migrate_default()
         ensure_web_secrets(cfg)
         try:

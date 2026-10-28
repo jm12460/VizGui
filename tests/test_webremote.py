@@ -42,3 +42,25 @@ def test_web_browse_traversal_blocked():
 def test_web_browse_bad_source_index():
     with mock.patch.object(config, "CFG", {"sources": []}):
         assert webremote.web_browse(0, "")["ok"] is False
+
+
+def test_web_path_ok_confines_to_sources():
+    with tempfile.TemporaryDirectory() as d:
+        inside = os.path.join(d, "ep1.mp4")
+        open(inside, "w").close()
+        with tempfile.TemporaryDirectory() as other:
+            outside = os.path.join(other, "secret.mp4")
+            open(outside, "w").close()
+            with mock.patch.object(config, "CFG", {"sources": [{"name": "T", "path": d}]}):
+                assert webremote.web_path_ok(inside) is True
+                assert webremote.web_path_ok(outside) is False      # outside any source
+                assert webremote.web_path_ok(os.path.join(d, "nope.mp4")) is False  # not a file
+                assert webremote.web_path_ok("") is False
+
+
+def test_web_path_ok_blocks_traversal_out_of_source():
+    with tempfile.TemporaryDirectory() as d:
+        open(os.path.join(d, "ep.mp4"), "w").close()
+        with mock.patch.object(config, "CFG", {"sources": [{"name": "T", "path": d}]}):
+            # a crafted ../ path that resolves outside the root is rejected
+            assert webremote.web_path_ok(os.path.join(d, "..", "etc", "passwd")) is False
