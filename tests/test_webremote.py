@@ -66,7 +66,7 @@ def test_web_path_ok_blocks_traversal_out_of_source():
             assert webremote.web_path_ok(os.path.join(d, "..", "etc", "passwd")) is False
 
 
-def test_web_search_recursive_substring_match():
+def test_web_search_recursive_file_match():
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, "Season 1"))
         os.makedirs(os.path.join(d, "Season 2"))
@@ -77,12 +77,42 @@ def test_web_search_recursive_substring_match():
         with mock.patch.object(config, "CFG", {"sources": [{"name": "T", "path": d}]}):
             r = webremote.web_search(0, "alien")
     assert r["ok"] is True
+    # folders ("Season 1/2") don't match; the two alien videos do
     names = sorted(e["name"] for e in r["entries"])
     assert names == ["Alien.mkv", "aliens.mp4"]
-    # folder is relative to the source root, path is absolute within it
     by_name = {e["name"]: e for e in r["entries"]}
+    assert by_name["Alien.mkv"]["dir"] is False
     assert by_name["Alien.mkv"]["folder"] == "Season 1"
     assert by_name["Alien.mkv"]["path"].endswith("Season 1/Alien.mkv")
+
+
+def test_web_search_matching_folder_collapses_contents():
+    # searching a show name returns the folder, NOT every episode under it
+    with tempfile.TemporaryDirectory() as d:
+        show = os.path.join(d, "Family Guy", "Season 3")
+        os.makedirs(show)
+        for i in range(1, 6):
+            open(os.path.join(show, f"Family Guy - S03E0{i}.mkv"), "w").close()
+        with mock.patch.object(config, "CFG", {"sources": [{"name": "T", "path": d}]}):
+            r = webremote.web_search(0, "family guy")
+    assert r["ok"] is True
+    assert len(r["entries"]) == 1              # one folder, not 5 episodes
+    e = r["entries"][0]
+    assert e["dir"] is True and e["name"] == "Family Guy" and e["rel"] == "Family Guy"
+
+
+def test_web_search_multiword_and_narrows():
+    with tempfile.TemporaryDirectory() as d:
+        show = os.path.join(d, "Family Guy", "Season 3")
+        os.makedirs(show)
+        open(os.path.join(show, "Family Guy - S03E05 - The Pilot.mkv"), "w").close()
+        open(os.path.join(show, "Family Guy - S03E06 - Other.mkv"), "w").close()
+        with mock.patch.object(config, "CFG", {"sources": [{"name": "T", "path": d}]}):
+            r = webremote.web_search(0, "family guy pilot")
+    # the folder "Family Guy" lacks "pilot", so it is not collapsed; only the
+    # episode whose path contains all three words matches
+    names = [e["name"] for e in r["entries"]]
+    assert names == ["Family Guy - S03E05 - The Pilot.mkv"]
 
 
 def test_web_search_empty_query_returns_nothing():

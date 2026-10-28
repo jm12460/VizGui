@@ -294,12 +294,14 @@ async function runSearch(q){const seq=++searchSeq;
  if(d.truncated)list.appendChild(msgDiv('… more matches not shown — refine your search.'));
 }
 function resultRow(e){const b=document.createElement('button');
- const ic=document.createElement('span');ic.className='ic';ic.textContent='🎬';
+ const ic=document.createElement('span');ic.className='ic';ic.textContent=e.dir?'📁':'🎬';
  const col=document.createElement('span');col.className='r2';
  const n=document.createElement('span');n.className='nm';n.textContent=e.name;
  const f=document.createElement('span');f.className='fd';f.textContent=e.folder||'/';
  col.appendChild(n);col.appendChild(f);b.appendChild(ic);b.appendChild(col);
- b.addEventListener('click',()=>castFile(e.path,e.name));return b;}
+ // a folder match opens that folder (browse() clears the search); a file casts
+ b.addEventListener('click',e.dir?(()=>browse(curSrc,e.rel)):(()=>castFile(e.path,e.name)));
+ return b;}
 async function castFile(path,name){const b=$('bmsg');b.textContent='Casting '+name+'…';
  await cmd({kind:'cast',path:path});setTimeout(poll,400);}
 /* ---- chapters (overlay) ---- */

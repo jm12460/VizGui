@@ -425,15 +425,26 @@ class MainWindow(QMainWindow):
             self.results.addItem(QListWidgetItem(f"No videos matching “{q}”."))
             return
         for e in entries:
-            it = QListWidgetItem(f"🎬  {e['name']}\n      {e.get('folder') or '/'}")
+            icon = "📁" if e.get("dir") else "🎬"
+            it = QListWidgetItem(f"{icon}  {e['name']}\n      {e.get('folder') or '/'}")
             it.setData(Qt.UserRole, e["path"])
+            it.setData(Qt.UserRole + 1, bool(e.get("dir")))
             self.results.addItem(it)
         if res.get("truncated"):
             self.results.addItem(QListWidgetItem("… more matches not shown — refine your search."))
 
     def _result_activated(self, item):
         path = item.data(Qt.UserRole)
-        if path and os.path.isfile(path):
+        if not path:
+            return
+        if item.data(Qt.UserRole + 1):          # a matched folder -> reveal it in the tree
+            self.search_box.clear()             # back to the tree view (same source root)
+            idx = self.model.index(path)
+            if idx.isValid():
+                self.tree.setCurrentIndex(idx)
+                self.tree.expand(idx)
+                self.tree.scrollTo(idx)
+        elif os.path.isfile(path):
             self._play(path)
 
     def _reload_sources(self):

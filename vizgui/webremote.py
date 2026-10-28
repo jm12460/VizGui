@@ -130,15 +130,23 @@ def web_browse(src_idx, sub):
 
 
 def web_search(src_idx, query, limit=300):
-    """Recursive video-file name search within one source root (confined to it).
-    Case-insensitive substring match on the filename. Returns a flat list so the
-    phone/desktop can show matches without clicking through folders. Filesystem
-    only (no Qt), so it's safe on the HTTP thread or a worker thread."""
+    """Recursive media search within one source root (confined to it).
+
+    The query is split into whitespace words; every word must appear (case-
+    insensitively) in an item's relative path (AND match), so 'family guy pilot'
+    narrows instead of matching a single contiguous substring.
+
+    A matching FOLDER is returned as one navigable entry and its contents are NOT
+    descended - so searching a show name collapses to the show folder rather than
+    dumping every episode. Loose matching video files are returned too.
+
+    Folders come first, then files; each group sorted by path. Filesystem only
+    (no Qt), so it's safe on the HTTP thread or a worker thread."""
     srcs = config.CFG.get("sources", [])
     if not (0 <= src_idx < len(srcs)):
         return {"ok": False, "error": "no such source"}
-    q = (query or "").strip().lower()
-    if not q:
+    tokens = (query or "").lower().split()
+    if not tokens:
         return {"ok": True, "src": src_idx, "query": "", "entries": []}
     try:
         base = source_path(srcs[src_idx])
@@ -146,21 +154,38 @@ def web_search(src_idx, query, limit=300):
         return {"ok": False, "error": str(e)}
     real_base = os.path.realpath(base)
     exts = tuple(g[1:] for g in VIDEO_GLOBS)
-    out = []
-    for root, dirs, files in os.walk(real_base):   # followlinks=False -> no loops
-        dirs[:] = sorted((d for d in dirs if not d.startswith(".")), key=str.lower)
-        for nm in sorted(files, key=str.lower):
+
+    def hit(rel):
+        rl = rel.lower()
+        return all(t in rl for t in tokens)
+
+    folders, files = [], []
+    for root, dirs, names in os.walk(real_base):   # followlinks=False -> no loops
+        keep = []
+        for dn in sorted((d for d in dirs if not d.startswith(".")), key=str.lower):
+            full = os.path.join(root, dn)
+            rel = os.path.relpath(full, real_base)
+            if hit(rel):
+                folders.append({"name": dn, "dir": True, "rel": rel, "path": full,
+                                "folder": os.path.dirname(rel)})
+            else:
+                keep.append(dn)      # only descend into folders we didn't match
+        dirs[:] = keep
+        for nm in sorted(names, key=str.lower):
             if nm.startswith(".") or not nm.lower().endswith(exts):
                 continue
-            if q in nm.lower():
-                full = os.path.join(root, nm)
-                rel = os.path.relpath(full, real_base)
-                out.append({"name": nm, "rel": rel, "path": full,
-                            "folder": os.path.dirname(rel)})
-                if len(out) >= limit:
-                    return {"ok": True, "src": src_idx, "query": query,
-                            "entries": out, "truncated": True}
-    return {"ok": True, "src": src_idx, "query": query, "entries": out}
+            rel = os.path.relpath(os.path.join(root, nm), real_base)
+            if hit(rel):
+                files.append({"name": nm, "dir": False, "rel": rel,
+                              "path": os.path.join(root, nm),
+                              "folder": os.path.dirname(rel)})
+
+    folders.sort(key=lambda e: e["rel"].lower())
+    files.sort(key=lambda e: e["rel"].lower())
+    entries = folders + files
+    truncated = len(entries) > limit
+    return {"ok": True, "src": src_idx, "query": query,
+            "entries": entries[:limit], "truncated": truncated}
 
 
 def web_path_ok(path):
