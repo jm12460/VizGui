@@ -8,6 +8,7 @@ Imports cleanly on any OS (constants are literals, not Windows-only attributes)
 so the pure logic can be unit-tested anywhere.
 """
 import ipaddress
+import logging
 import os
 import subprocess
 
@@ -100,36 +101,51 @@ def firewall_allow_cmd(cidr, port):
 
 
 class _WinCasterHandle(CasterHandle):
-    """Kill the whole tree (go-chromecast + any ffmpeg child) via taskkill /T."""
+    """Kill the tree via taskkill /T, then wait for the caster to exit.
+
+    If taskkill fails, at least stop the caster itself. That fallback cannot
+    guarantee child-process cleanup.
+    """
     def terminate(self):
         p = self._p
-        if p.poll() is None:
-            try:
-                subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)],
-                               capture_output=True, timeout=5,
-                               creationflags=_CREATE_NO_WINDOW)
-            except Exception:
-                try:
-                    p.kill()
-                except Exception:
-                    pass
+        if p.poll() is not None:
+            return
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)],
+                           capture_output=True, timeout=5, check=True,
+                           creationflags=_CREATE_NO_WINDOW)
+            p.wait(timeout=3)
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:
+            if p.poll() is None:
+                p.kill()
+            p.wait(timeout=3)
+        except (OSError, subprocess.SubprocessError):
+            logging.getLogger(__name__).warning(
+                "Could not terminate caster process %s", p.pid, exc_info=True)
 
 
 def launch_caster(args, env=None, log_path=None):
     out = open(log_path, "wb") if log_path else subprocess.DEVNULL
-    p = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=out, stderr=out, env=env,
-                         creationflags=_CREATE_NO_WINDOW | _CREATE_NEW_PROCESS_GROUP)
-    if log_path:
-        out.close()
+    try:
+        p = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=out, stderr=out, env=env,
+                             creationflags=_CREATE_NO_WINDOW | _CREATE_NEW_PROCESS_GROUP)
+    finally:
+        if log_path:
+            out.close()
     return _WinCasterHandle(p)
 
 
 def launch_detached(args, log_path=None):
     out = open(log_path, "wb") if log_path else subprocess.DEVNULL
-    p = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
-                         creationflags=_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP)
-    if log_path:
-        out.close()
+    try:
+        p = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                             creationflags=_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP)
+    finally:
+        if log_path:
+            out.close()
     return p
 
 
