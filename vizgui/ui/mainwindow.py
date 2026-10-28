@@ -484,9 +484,11 @@ class MainWindow(QMainWindow):
         run_async(lambda: self.active.start(path, items, self.auto_next, resume, audio), done)
         self._media = {"audio": [], "subs": [], "chapters": []}
         self.b_chapters.hide(); self.b_audio.hide()
-        run_async(lambda: probe.probe(path), self._probe_done)
+        run_async(lambda: probe.probe(path), lambda r: self._probe_done(path, r))
 
-    def _probe_done(self, res):
+    def _probe_done(self, path, res):
+        if path != self._now_path:   # cast failed or moved on -> don't show stale controls
+            return
         self._media = res if isinstance(res, dict) and "chapters" in res else \
             {"audio": [], "subs": [], "chapters": []}
         self.b_chapters.setVisible(bool(self._media.get("chapters")))
@@ -770,7 +772,13 @@ class MainWindow(QMainWindow):
             self.now_title = None
             self.now_live = False
             self._np_playing = False
+            self._now_path = None
+            self._media = {"audio": [], "subs": [], "chapters": []}
+            self._audio = None
+            if self.target == "cast":
+                history.clear_current()
             self.np_badge.hide()
+            self.b_chapters.hide(); self.b_audio.hide()
             self.np_title.setText("Nothing playing.")
             self.np_bar.setRange(0, 1000); self.np_bar.setValue(0)
             self.np_time.setText("")

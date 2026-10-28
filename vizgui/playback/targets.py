@@ -40,6 +40,17 @@ class CastTarget(PlaybackTarget):
         if h:
             h.terminate()
 
+    def _wait_idle(self, budget=4.0):
+        """Wait (time-budgeted) for the receiver to report idle, so a replacement
+        session starts from a clean slate instead of racing the old one."""
+        deadline = time.monotonic() + budget
+        while time.monotonic() < deadline:
+            time.sleep(0.4)
+            ok, out = gc("status", timeout=3)
+            line = out.splitlines()[0] if out else ""
+            if not line or "Idle" in line or "Backdrop" in line:
+                return
+
     def start(self, path, items, auto_next, resume=0, audio=None):
         plan = cast_plan(media.vcodec(path), os.path.splitext(path)[1])
         if plan == "direct" and audio is not None:
@@ -49,7 +60,9 @@ class CastTarget(PlaybackTarget):
             return "ffmpeg isn't installed — can't transcode/remux this file."
         self._kill()
         gc("stop")                 # end the receiver session cleanly
-        time.sleep(1)
+        self._wait_idle()          # let the receiver fully reset before a new
+                                   # session, or go-chromecast's app-switch handshake
+                                   # times out ("context deadline exceeded") on re-cast
         base = [GC, "--addr", config.TV_IP, "--port", config.CAST_PORT]
         if plan == "direct":
             self.handle = platforms.launch_caster(
