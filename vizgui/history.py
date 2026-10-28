@@ -11,6 +11,7 @@ import time
 from .paths import CONFIG_DIR
 
 HISTORY_PATH = os.path.join(CONFIG_DIR, "history.json")
+CURRENT_PATH = os.path.join(CONFIG_DIR, "current_playback.json")
 
 _FINISHED = 0.92   # watched >= 92% -> treat as finished (drop from the list)
 _MIN_POS = 20      # ignore the first few seconds (not worth resuming)
@@ -80,3 +81,66 @@ def forget(path):
 
 def clear():
     _save({})
+
+
+def set_current(path, title="", resume_base=0):
+    """Persist the source identity for reconnecting the UI to an active Cast."""
+    if not path:
+        return
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        tmp = CURRENT_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"path": os.path.abspath(path), "title": title,
+                       "resume_base": int(resume_base or 0)}, f)
+        os.replace(tmp, CURRENT_PATH)
+    except OSError:
+        pass
+
+
+def current():
+    """Return the last Cast source identity, if it was persisted."""
+    try:
+        with open(CURRENT_PATH) as f:
+            d = json.load(f)
+        if isinstance(d, dict) and d.get("path"):
+            return d
+    except Exception:
+        pass
+    return None
+
+
+def clear_current():
+    try:
+        os.remove(CURRENT_PATH)
+    except OSError:
+        pass
+
+
+def recover_match(media_file, saved, recent, safe=None, exists=os.path.isfile):
+    """Identify which local file a Cast receiver is playing after an app restart,
+    and whether we can reattach (re-cast) to it.
+
+    `media_file` is the receiver's reported name: the sanitized filename for a
+    direct cast, or ``pipe_output`` for a live transcode/remux. A transcode
+    carries no filename, so it can ONLY be recovered from our own ``saved``
+    current cast — never guessed from history (that would launch the wrong
+    episode). ``safe`` / ``exists`` are injectable for testing.
+
+    -> {path, title, resume_base, reattach} or None.
+    """
+    if safe is None:
+        from .playback.media import safe_name as safe
+    is_pipe = media_file == "pipe_output"
+    if saved and exists(saved.get("path", "")):
+        sp = saved["path"]
+        if is_pipe or media_file in (os.path.basename(sp), safe(sp)):
+            return {"path": sp, "title": saved.get("title") or os.path.basename(sp),
+                    "resume_base": int(saved.get("resume_base", 0)), "reattach": True}
+    if not is_pipe:                      # a direct cast we can name from history
+        for e in recent:
+            p = e.get("path", "")
+            if media_file in (os.path.basename(p), safe(p)) or e.get("title") == media_file:
+                return {"path": p, "title": e.get("title") or os.path.basename(p),
+                        "resume_base": 0, "reattach": True}
+    return None                          # live stream we didn't save -> don't guess

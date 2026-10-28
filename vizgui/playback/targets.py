@@ -99,7 +99,10 @@ class CastTarget(PlaybackTarget):
             return {"idle": True, "busy": bool(self.handle and self.handle.poll() is None)}
         d = parse_status(line)
         d["idle"] = False
-        d["live"] = self.live
+        # A new app process doesn't know its previous CastTarget.live flag.
+        # go-chromecast names the transcoded stream pipe_output, so recover that
+        # fact from the receiver's current media status.
+        d["live"] = self.live or d.get("file") == "pipe_output"
         return d
 
 

@@ -72,6 +72,8 @@ class MainWindow(QMainWindow):
         self._now_path = None       # the file currently cast (for "next in folder")
         self._saw_playing = False   # True once this cast actually reached PLAYING
         self._user_stopped = False  # True when the user hit Stop (suppresses auto-next)
+        self._recovered_cast_session = False
+        self._startup_recast_attempted = False
         # last-known playback state, advanced locally once a second between polls
         self._np_pos = 0; self._np_dur = 0; self._np_state = ""; self._np_playing = False
         self._resume_base = 0       # seconds a live stream was resumed from (pos is relative)
@@ -255,11 +257,30 @@ class MainWindow(QMainWindow):
     def _remember(self):
         """Record where the current file stopped, for continue-watching. For a live
         stream the reported pos is relative to the resume point, so add the base."""
-        if self._now_path and self._np_dur > 0:
+        if self._now_path and (self._np_dur > 0 or self.now_live):
             base = self._resume_base if self.now_live else 0
             history.record(self._now_path, self._np_pos + base, self._np_dur,
                            self.now_title or "")
             self._last_save = time.time()
+
+    def _recover_cast_item(self, st):
+        """After an app restart, reconnect the UI to the active Cast item. The
+        direct-vs-transcode matching rules live in history.recover_match."""
+        media_file = st.get("file", "")
+        m = history.recover_match(media_file, history.current(), history.recent())
+        if not m:
+            if media_file == "pipe_output":
+                log.warning("active transcode source unknown; refusing to guess from history")
+            return
+        self._now_path = m["path"]
+        self.now_title = m["title"]
+        self._resume_base = m["resume_base"]
+        self._recovered_cast_session = m["reattach"]
+        # a direct cast identified from history needs its source saved for next time
+        if media_file != "pipe_output" and (history.current() or {}).get("path") != m["path"]:
+            history.set_current(m["path"], m["title"], 0)
+        self._saw_playing = st.get("state") in ("PLAYING", "PAUSED")
+        log.info("recovered active Cast item: %s", self.now_title)
 
     def cast_selected(self):
         p = self._sel_path()
@@ -433,6 +454,8 @@ class MainWindow(QMainWindow):
             self._status(msg)
             return
         self.now_title = os.path.basename(path.rstrip(os.sep)) or path
+        if self.target == "cast":
+            history.set_current(path, self.now_title, resume)
         self._casting = True
         self._np_pos = 0
         self._np_playing = False
@@ -448,6 +471,8 @@ class MainWindow(QMainWindow):
             self._casting = False
             self.b_cast.setEnabled(True)
             if res != "playing":
+                if self.target == "cast":
+                    history.clear_current()
                 self.np_title.setText(str(res))
                 self._status(str(res))
             self.poll_cast()
@@ -491,21 +516,31 @@ class MainWindow(QMainWindow):
 
     def _t_stop(self):
         self._user_stopped = True
+        if self.target == "cast":
+            history.clear_current()
         self._remember()
         if self.target == "vlc":
             self.now_title = None
         return self.active.stop()
 
-    def _on_ended(self):
+    def _on_ended(self, allow_auto_next=True, finished=True):
         """Current item finished. Auto-advance if the target needs us to, else clear."""
-        self._remember()                 # finished -> dropped from the continue list
-        if (self.auto_next and not self._user_stopped and self._now_path
-                and self.active.needs_advance_on_end()):
-            nxt = media.next_file(self._now_path)
-            if nxt:
-                log.info("auto-next -> %s", os.path.basename(nxt))
-                self._cast(nxt)
-                return
+        old_path = self._now_path
+        unknown_duration_live_end = finished and self.now_live and self._np_dur <= 0
+        if not unknown_duration_live_end:
+            self._remember()             # finished -> dropped from the continue list
+        nxt = (media.next_file(self._now_path)
+               if allow_auto_next and self.auto_next and not self._user_stopped
+               and self._now_path and self.active.needs_advance_on_end() else None)
+        if nxt:
+            log.info("auto-next -> %s", os.path.basename(nxt))
+            self._cast(nxt)
+            if unknown_duration_live_end:
+                history.forget(old_path)
+            return
+        history.clear_current()
+        if unknown_duration_live_end:
+            history.forget(old_path)
         self.active.shutdown()
         self.now_title = None
         self.now_live = False
@@ -694,7 +729,13 @@ class MainWindow(QMainWindow):
             if self._casting or st.get("busy"):
                 return
             if self._saw_playing:
-                self._on_ended()
+                # Cast receivers can drop a paused session and report Idle. That
+                # is not evidence the episode finished, so don't jump to the
+                # next file if our last confirmed playback state was PAUSED.
+                paused = self._np_state == "PAUSED"
+                if paused:
+                    log.info("playback went idle while paused; suppressing auto-next")
+                self._on_ended(allow_auto_next=not paused, finished=not paused)
                 return
             self.now_title = None
             self.now_live = False
@@ -704,13 +745,18 @@ class MainWindow(QMainWindow):
             self.np_bar.setRange(0, 1000); self.np_bar.setValue(0)
             self.np_time.setText("")
             return
+        if self.target == "cast" and not self._now_path:
+            self._recover_cast_item(st)
         self.now_live = st.get("live", False)
         if st.get("path"):          # MPRIS gives the real path -> Next/Prev + title
             self._now_path = st["path"]
         if self.target == "vlc":
             title = st.get("file") or self.now_title or "VLC"
         else:
-            title = self.now_title or st.get("file") or "Playing"
+            status_title = st.get("file") or "Playing"
+            if status_title == "pipe_output":
+                status_title = "Live cast"
+            title = self.now_title or status_title
         self.np_title.setText(title)
         self._np_pos = st.get("pos", 0)
         self._np_dur = st.get("dur", 0)
@@ -718,6 +764,16 @@ class MainWindow(QMainWindow):
         self._np_playing = self._np_state in ("PLAYING", "")
         if self._np_state == "PLAYING":
             self._saw_playing = True
+        if (self._recovered_cast_session and not self._startup_recast_attempted
+                and self._np_state == "PLAYING" and self._now_path):
+            # The previous app owned the local HTTP stream. Re-open it from the
+            # receiver's current position before its remaining buffer runs out.
+            resume = self._np_pos + (self._resume_base if self.now_live else 0)
+            self._startup_recast_attempted = True
+            self._recovered_cast_session = False
+            log.info("reattaching to Cast stream at %ss: %s", resume, self.now_title)
+            self._cast(self._now_path, resume)
+            return
         if self._np_playing and time.time() - self._last_save > 12:
             self._remember()         # periodic save so a crash loses little
         self._render_np()

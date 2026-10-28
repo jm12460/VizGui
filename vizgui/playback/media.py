@@ -21,12 +21,18 @@ def vcodec(path):
         return ""
 
 
+def safe_name(path):
+    """The sanitized basename go-chromecast serves and reports for a file (so the
+    receiver's media filename can be matched back to its source)."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(path)) or "video"
+
+
 def symlink_serve(path):
     """Serve a file via a safe-named symlink in CACHE. go-chromecast embeds the
     path in its URL query where '+' etc. misbehave, so the served name must be
     sanitized; a symlink avoids copying."""
     os.makedirs(CACHE, exist_ok=True)
-    safe = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(path)) or "video"
+    safe = safe_name(path)
     link = os.path.join(CACHE, safe)
     try:
         if os.path.lexists(link):
