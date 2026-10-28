@@ -43,8 +43,13 @@ class SmbDialog(QDialog):
         form.addRow(bb)
 
     def result_source(self):
-        server = self.server.text().strip()
-        share = self.share.text().strip()
+        server = self.server.text().strip().strip("/\\")
+        share = self.share.text().strip().strip("/\\")
+        # Normalize dashed IPs (e.g. from Synology QuickConnect URLs: 192-168-0-58 -> 192.168.0.58)
+        import re
+        m = re.search(r"(\d{1,3})-(\d{1,3})-(\d{1,3})-(\d{1,3})", server)
+        if m:
+            server = ".".join(m.groups())
         if not server or not share:
             return None
         smb = {"server": server, "share": share, "guest": self.guest.isChecked(),
@@ -72,12 +77,12 @@ class SetupDialog(QDialog):
         self.src_list = QListWidget(); sv.addWidget(self.src_list, 1)
         sb = QHBoxLayout()
         b_add = QPushButton("Add folder…"); b_add.clicked.connect(self._add_source)
-        b_smb = QPushButton("Add SMB share…"); b_smb.clicked.connect(self._add_smb)
+        b_smb = QPushButton("Add NAS/SMB share…"); b_smb.clicked.connect(self._add_smb)
         b_rms = QPushButton("Remove"); b_rms.clicked.connect(self._rm_source)
         sb.addWidget(b_add); sb.addWidget(b_smb); sb.addWidget(b_rms); sb.addStretch(1)
         sv.addLayout(sb)
         hint = QLabel("A folder is any local path or already-mounted drive. "
-                      "Add SMB share connects to a NAS over the network (no mounting needed).")
+                      "Add NAS/SMB share connects to a NAS over the network (no mounting needed).")
         hint.setObjectName("status"); hint.setWordWrap(True); sv.addWidget(hint)
         tabs.addTab(srcw, "Sources")
 

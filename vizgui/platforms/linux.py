@@ -5,6 +5,7 @@ import ipaddress
 import os
 import re
 import subprocess
+import urllib.parse
 
 from ._posix import launch_caster, launch_detached  # noqa: F401 - re-exported
 
@@ -60,7 +61,7 @@ def find_mount(server, share):
         return None
     sv, sh = server.lower(), share.lower()
     for e in entries:
-        el = e.lower()
+        el = urllib.parse.unquote(e).lower()
         if el.startswith("smb-share:") and f"server={sv}" in el and f"share={sh}" in el:
             full = os.path.join(_gvfs_dir(), e)
             if os.path.isdir(full):
