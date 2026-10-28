@@ -4,8 +4,9 @@ Where vizgui is headed: from a working single-user Linux app to something
 **anyone can download and use, cross-platform, with ease-of-use and
 functionality out of the box.**
 
-Current status: **v0.1.0** · Linux only · 69 passing tests · installs via
-`install.sh` (clone + fetch go-chromecast binary).
+Current status: **v0.3.0** · Linux (daily-driven); Windows/macOS backends
+written but untested on hardware · 151 passing tests · installs via `install.sh`
+(pacman/apt/dnf) or pip; stable + `-git` PKGBUILDs ready (AUR publish pending).
 
 Phases ship in order; each one is usable on its own. Linux first (that's what
 works today), then Windows and macOS.
@@ -23,10 +24,32 @@ noting because they make the cross-platform work *additive* instead of a rewrite
 - [x] **Playback-engine extraction** (`vizgui/playback/` — `PlaybackTarget`
       contract + `CastTarget`/`VlcTarget` adapters); a new target (e.g. DLNA) is
       a self-contained file
-- [x] Test suite (69 tests, pure-logic, no GUI/network/hardware)
+- [x] Test suite (151 tests, pure-logic, no GUI/network/hardware)
 - [x] Reliability pass (status bar, startup health check, graceful
       tool-missing handling)
 - [x] MIT licensed, generic branding, public repo
+
+---
+
+## Shipped since v0.1.0 (v0.2.0 – v0.3.0)
+
+Feature and hardening work beyond the original roadmap — captured here so the
+plan reflects reality:
+
+- [x] **Continue watching** — per-file resume across cast/remux/transcode/VLC
+      (desktop button + phone overlay).
+- [x] **Audio-track / subtitle / chapter selection** — embedded + sidecar subs;
+      burned in on Cast (text + image/PGS), native on VLC; chapter jumps.
+- [x] **Cast-session restore** — reattach to an active cast after an app restart.
+- [x] **Media search** — recursive, per-source, in both the desktop tree and the
+      phone Browse tab; multi-word AND matching; a matching folder collapses to
+      one entry instead of dumping every episode.
+- [x] **Desktop browser polish** — themed folder/video icons, clean row
+      selection, single-click folder expand.
+- [x] **Security + reliability fixes** — XSS-safe phone UI (DOM, no innerHTML);
+      web-cast paths confined to source roots; corrupted config backed up, not
+      wiped; VLC launch/reuse reliability; VLC Continue-watching tracks the real
+      file after a native skip.
 
 ---
 
@@ -46,7 +69,9 @@ Turn "clone + shim + curl a binary" into a real, managed package.
 - [x] Ship `.desktop` entry + SVG icon via the package (`packaging/`).
 - [ ] **Test in a clean Arch container/VM** with nothing pre-installed — the
       whole point is proving zero-setup install (`makepkg` + install).
-- [ ] Publish to the AUR.
+      *(Next unchecked gate for Phase 1; homelab VMs available.)*
+- [ ] Publish to the AUR. *(Blocked externally: AUR account registration
+      freeze. PKGBUILDs are ready in `packaging/`.)*
 
 **Risk:** low. Fastest win; covers the Arch/CachyOS crowd (most early users).
 
@@ -60,8 +85,8 @@ makes manual testing untenable.
 - [x] A **release process**: push a `v*` tag → `release.yml` builds sdist/wheel
       and cuts a GitHub release (AUR & Flatpak can reference these tags).
 - [x] **`CHANGELOG.md`** (keep-a-changelog style).
-- [x] Cut the first **`v0.1.0`** tag (release workflow builds sdist/wheel + the
-      GitHub release).
+- [x] Cut tags **`v0.1.0`**, **`v0.2.0`**, **`v0.3.0`** (release workflow builds
+      sdist/wheel + the GitHub release on each `v*` tag).
 - [x] Add a stable `vizgui` PKGBUILD built from the v0.1.0 release tarball
       (`packaging/vizgui/`), alongside `vizgui-git` (`packaging/vizgui-git/`).
 
@@ -83,8 +108,9 @@ The ease-of-use half. Mostly hardening what already exists.
       (tracked by `config.FRESH_INSTALL`), with the TV auto-appearing in it.
 - [ ] A **"test connection"** affordance in the wizard (TV reachable? share
       mountable?). *(optional polish)*
-- [ ] Config **upgrade safety** — never corrupt an older config across versions.
-      *(basic: load backfills missing keys via setdefault)*
+- [x] Config **upgrade safety** — load backfills missing keys via setdefault,
+      and a present-but-unreadable config is backed up (`.corrupt`) rather than
+      silently overwritten, so SMB passwords / phone pairings survive (v0.3.0).
 
 **Risk:** low, high payoff. This is what makes a stranger keep the app.
 
@@ -112,8 +138,8 @@ Windows/macOS** — pure logic is unit-tested, hardware behavior is not.
       hw encode videotoolbox; PTY caster shared with Linux.
 - [x] Add `vlc_exe()`/`has_vlc()` to the contract so VLC is found off-PATH.
 - [x] Platform unit tests for both backends (`test_platforms.py`).
-- [ ] Replace the `qrencode` CLI with the **`qrcode` Python lib** so QR pairing
-      works on Win/Mac (currently degrades to PIN there).
+- [x] Replace the `qrencode` CLI with the **`qrcode` Python lib** so QR pairing
+      works on Win/Mac (painted with Qt, no external binary) — done in v0.2.0.
 - [ ] **Windows transcode/remux:** `write_wrapper` emits a bash script, so only
       direct-cast works on Windows — needs a `.bat`/host-native wrapper (macOS
       has bash, so it's fine there).
