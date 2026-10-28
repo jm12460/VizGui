@@ -62,7 +62,7 @@ def qr_pixmap(data, box=8, border=3):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Basement Display")
+        self.setWindowTitle("vizgui")
         self.resize(980, 640)
         self.target = "cast"    # "cast" (TV via go-chromecast) or "vlc" (this PC)
         self.targets = {"cast": CastTarget(), "vlc": VlcTarget()}   # playback adapters

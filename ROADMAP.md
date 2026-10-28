@@ -163,7 +163,8 @@ to fill. Real-hardware testing is the remaining unknown.
 
 ## Polish & adoption (ongoing)
 
-- [ ] **README screenshots** / a short demo gif — sells a download-and-use app.
+- [x] **README screenshots** — desktop + phone remote (Remote/Browse) in the
+      README. *(A short demo gif is still a nice-to-have.)*
 - [ ] **`CONTRIBUTING.md`** + dev-setup notes (it's a public repo now).
 - [ ] Surface logs easily for supporting non-technical users.
 

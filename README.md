@@ -7,6 +7,14 @@ on-screen remote, a phone web-remote, continue-watching, subtitle / audio-track 
 chapter selection, SMB network sources, and a first-run setup wizard. No account,
 no subscription. A single-user desktop app (PySide6/Qt).
 
+![vizgui desktop app — media browser, now-playing, and SmartCast remote](docs/screenshots/desktop.png)
+
+<p align="center">
+  <img src="docs/screenshots/phone-remote.png" width="31%" alt="Phone remote — transport and SmartCast keys">
+  &nbsp;
+  <img src="docs/screenshots/phone-browse.png" width="31%" alt="Phone remote — browse and search your media">
+</p>
+
 ## Features
 - **Two playback targets:** cast to a Chromecast / SmartCast TV, or play on this
   PC in VLC (reuses a running VLC; controlled over its HTTP interface, or MPRIS
