@@ -178,3 +178,23 @@ def test_cast_sub_forces_transcode():
         res = t.start("/m/x.mp4", ["/m/x.mp4"], False, sub={"i": 0, "kind": "text", "si": 0})
     assert res == "playing" and t.live is True
     assert ww.get("copy_video") is False and ww.get("sub") == {"kind": "text", "file": "/c/s.ass"}
+
+
+def test_vlc_own_vlc_stays_http_never_mpris():
+    t = targets.VlcTarget()
+    t.proc = mock.Mock(poll=lambda: None)    # we launched it, still alive
+    t.mode = "mpris"                         # a prior poll had flipped it
+    with mock.patch.object(targets, "vlc_status",
+                           return_value={"state": "PLAYING", "pos": 5, "dur": 50, "file": "f.mkv"}), \
+         mock.patch.object(targets, "vlc_any_status",
+                           side_effect=AssertionError("must not consult MPRIS for our own VLC")):
+        st = t.status()
+    assert st["idle"] is False and t.mode == "http"
+
+
+def test_vlc_own_http_hiccup_is_busy_not_idle():
+    t = targets.VlcTarget()
+    t.proc = mock.Mock(poll=lambda: None)
+    with mock.patch.object(targets, "vlc_status", return_value={"error": "timeout"}):
+        st = t.status()
+    assert st["idle"] is True and st["busy"] is True   # transient, not ended

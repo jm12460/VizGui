@@ -137,9 +137,14 @@ class VlcTarget(PlaybackTarget):
             return False, "VLC isn't installed — can't use the VLC target."
         return True, ""
 
+    def _own(self):
+        """True if we launched this VLC and it's still alive (so we control it
+        over HTTP and must not flip to MPRIS on a transient HTTP hiccup)."""
+        return self.proc is not None and self.proc.poll() is None
+
     def start(self, path, items, auto_next, resume=0, audio=None, sub=None):
-        # 1) Our HTTP VLC is running -> send the whole folder as a native playlist.
-        if "error" not in vlc_status():
+        # 1) Reuse our own HTTP VLC (preferred) -> send the folder as a native playlist.
+        if self._own() or "error" not in vlc_status():
             self.mode = "http"
             vlc_cmd("pl_empty")
             vlc_cmd("in_play&input=" + urllib.parse.quote(items[0]))
@@ -150,7 +155,7 @@ class VlcTarget(PlaybackTarget):
                 vlc_cmd(f"seek&val={int(resume)}")
             log.info("VLC(http) reuse: %d item(s)", len(items))
             return "playing"
-        # 2) A VLC opened by hand (no HTTP) -> control over MPRIS; detect-and-load.
+        # 2) A VLC opened by hand (we didn't launch one) -> control over MPRIS.
         if platforms.supports_mpris() and mpris_running():
             self.mode = "mpris"
             mpris_cmd("open", path_to_uri(items[0]))
@@ -174,7 +179,11 @@ class VlcTarget(PlaybackTarget):
         self.proc = platforms.launch_detached(
             [platforms.vlc_exe(), "--extraintf", "http", "--http-host", "127.0.0.1",
              "--http-port", str(VLC_PORT), "--http-password", VLC_PW,
-             "--no-random", "--no-loop", "--no-repeat", *start_arg, *items],
+             # --no-one-instance: VLC's single-instance mode (on by default) would
+             # otherwise forward our files to a lingering instance and exit without
+             # opening a window — so casts silently stop working after a while.
+             "--no-one-instance", "--no-random", "--no-loop", "--no-repeat",
+             *start_arg, *items],
             log_path=CASTER_LOG)
         for _ in range(20):
             time.sleep(0.5)
@@ -214,10 +223,16 @@ class VlcTarget(PlaybackTarget):
         return self.mode == "mpris"
 
     def status(self):
-        s = vlc_any_status()
-        if not isinstance(s, dict) or "error" in s:
-            return {"idle": True, "busy": bool(self.proc and self.proc.poll() is None)}
-        self.mode = s.get("_mode", self.mode)
+        if self._own():
+            s = vlc_status()                 # our VLC -> trust HTTP; don't flip to MPRIS
+            if "error" in s:
+                return {"idle": True, "busy": True}   # transient hiccup, not ended
+            self.mode = "http"
+        else:
+            s = vlc_any_status()
+            if not isinstance(s, dict) or "error" in s:
+                return {"idle": True, "busy": False}
+            self.mode = s.get("_mode", self.mode)
         if s.get("state") == "STOPPED":
             return {"idle": True, "busy": False}
         return {"idle": False, "state": s.get("state", ""), "pos": s.get("pos", 0),
