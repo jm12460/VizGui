@@ -47,9 +47,11 @@ QTreeView::item, QListWidget::item { padding: 8px 8px; color: #d4d9e1; }
 QListWidget::item { border-radius: 8px; }    /* search results read as chips */
 QTreeView::item:hover, QListWidget::item:hover { background: #1a2029; color: #eef1f5; }
 QTreeView::item:selected, QListWidget::item:selected { background: #3f7bff; color: #ffffff; }
-/* fill the branch gutter to match the row's state, so the selection/hover is one
-   clean bar instead of a blue bar with a dark notch punched out around the arrow */
-QTreeView::branch { background: transparent; }
+/* No expand/collapse arrows: folders toggle on a single click and carry their own
+   icon, so the arrow is redundant. image:none drops it on every base style, and
+   filling the gutter to match the row keeps selection/hover one clean bar. */
+QTreeView::branch { background: transparent; image: none; }
+QTreeView::branch:has-children { image: none; }
 QTreeView::branch:hover { background: #1a2029; }
 QTreeView::branch:selected { background: #3f7bff; }
 
