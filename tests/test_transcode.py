@@ -46,3 +46,12 @@ def test_wrapper_resume_adds_input_seek():
             assert "-ss 600 -i" in open(transcode.write_wrapper("/m/x.mkv", False, start=600)).read()
             assert "-ss 90 -i" in open(transcode.write_wrapper("/m/x.mkv", True, start=90)).read()
             assert "-ss" not in open(transcode.write_wrapper("/m/x.mkv", True, start=0)).read()
+
+
+def test_wrapper_audio_map():
+    with tempfile.TemporaryDirectory() as d:
+        wp = os.path.join(d, "t.sh")
+        with mock.patch.object(transcode, "WRAPPER", wp), \
+             mock.patch.object(transcode.platforms, "hw_encode_args", return_value=None):
+            assert "-map 0:v:0 -map 0:a:2" in open(transcode.write_wrapper("/m/x.mkv", True, audio=2)).read()
+            assert "-map 0:a" not in open(transcode.write_wrapper("/m/x.mkv", True)).read()

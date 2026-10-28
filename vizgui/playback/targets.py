@@ -40,8 +40,10 @@ class CastTarget(PlaybackTarget):
         if h:
             h.terminate()
 
-    def start(self, path, items, auto_next, resume=0):
+    def start(self, path, items, auto_next, resume=0, audio=None):
         plan = cast_plan(media.vcodec(path), os.path.splitext(path)[1])
+        if plan == "direct" and audio is not None:
+            plan = "remux"         # selecting a non-default audio needs a re-map
         self.live = plan != "direct"
         if self.live and not platforms.has_tool("ffmpeg"):
             return "ffmpeg isn't installed — can't transcode/remux this file."
@@ -55,7 +57,7 @@ class CastTarget(PlaybackTarget):
             what = "direct"
         else:
             # a live stream resumes by seeking the input (-ss); it begins at `resume`
-            wrapper = write_wrapper(path, copy_video=(plan == "remux"), start=resume)
+            wrapper = write_wrapper(path, copy_video=(plan == "remux"), start=resume, audio=audio)
             self.handle = platforms.launch_caster(
                 base + ["transcode", "--content-type", "video/mp4", "--command", wrapper],
                 log_path=CASTER_LOG)
@@ -118,7 +120,7 @@ class VlcTarget(PlaybackTarget):
             return False, "VLC isn't installed — can't use the VLC target."
         return True, ""
 
-    def start(self, path, items, auto_next, resume=0):
+    def start(self, path, items, auto_next, resume=0, audio=None):
         # 1) Our HTTP VLC is running -> send the whole folder as a native playlist.
         if "error" not in vlc_status():
             self.mode = "http"
@@ -145,6 +147,8 @@ class VlcTarget(PlaybackTarget):
         # 3) No VLC -> launch our own (HTTP), stays open, native playlist.
         self.mode = "http"
         start_arg = [f"--start-time={int(resume)}"] if resume else []
+        if audio is not None:
+            start_arg.append(f"--audio-track={int(audio)}")
         self.proc = platforms.launch_detached(
             [platforms.vlc_exe(), "--extraintf", "http", "--http-host", "127.0.0.1",
              "--http-port", str(VLC_PORT), "--http-password", VLC_PW,

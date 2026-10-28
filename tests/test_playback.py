@@ -137,3 +137,23 @@ def test_vlc_launch_includes_start_time_on_resume():
         res = t.start("/m/x.mkv", ["/m/x.mkv"], False, resume=300)
     assert res == "playing"
     assert "--start-time=300" in captured["args"]
+
+
+def test_cast_audio_forces_remux_on_direct():
+    t = targets.CastTarget()
+    ww = {}
+
+    def fake_ww(path, copy_video=False, start=0, audio=None):
+        ww.update(copy_video=copy_video, audio=audio)
+        return "/tmp/w.sh"
+
+    with mock.patch.object(targets, "gc", return_value=(True, "")), \
+         mock.patch.object(targets.media, "vcodec", return_value="h264"), \
+         mock.patch.object(targets, "write_wrapper", fake_ww), \
+         mock.patch.object(targets.platforms, "has_tool", return_value=True), \
+         mock.patch.object(targets.platforms, "launch_caster",
+                           return_value=mock.Mock(poll=lambda: None, pid=1, returncode=0)), \
+         mock.patch.object(targets.time, "sleep", lambda *a: None):
+        res = t.start("/m/x.mp4", ["/m/x.mp4"], False, resume=0, audio=1)
+    assert res == "playing" and t.live is True
+    assert ww.get("copy_video") is True and ww.get("audio") == 1

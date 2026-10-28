@@ -79,6 +79,7 @@ class MainWindow(QMainWindow):
         self._resume_base = 0       # seconds a live stream was resumed from (pos is relative)
         self._last_save = 0.0       # throttle history writes during playback
         self._media = {"audio": [], "subs": [], "chapters": []}   # ffprobe of current file
+        self._audio = None          # selected audio track (0-based), None = file default
 
         root = QWidget(); self.setCentralWidget(root)
         outer = QHBoxLayout(root)
@@ -151,12 +152,15 @@ class MainWindow(QMainWindow):
         nhdr = QHBoxLayout()
         nt = QLabel("NOW PLAYING"); nt.setObjectName("title")
         self.np_badge = QLabel("● LIVE"); self.np_badge.setObjectName("badge"); self.np_badge.hide()
+        self.b_audio = QPushButton("Audio ▾"); self.b_audio.hide()
+        self.b_audio.clicked.connect(self._audio_menu)
         self.b_chapters = QPushButton("Chapters ▾"); self.b_chapters.hide()
         self.b_chapters.clicked.connect(self._chapters_menu)
         self.autonext_cb = QCheckBox("Auto-play next")
         self.autonext_cb.setChecked(self.auto_next)
         self.autonext_cb.toggled.connect(self._set_autonext)
         nhdr.addWidget(nt); nhdr.addStretch(1); nhdr.addWidget(self.np_badge)
+        nhdr.addWidget(self.b_audio)
         nhdr.addWidget(self.b_chapters)
         nhdr.addWidget(self.autonext_cb)
         nl.addLayout(nhdr)
@@ -441,10 +445,11 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _cast(self, path, resume=0):
+    def _cast(self, path, resume=0, audio=None):
         self._remember()                 # save position of the file we're leaving
         self._now_path = path
         self._resume_base = resume
+        self._audio = audio
         self._last_save = time.time()
         self._saw_playing = False
         self._user_stopped = False
@@ -476,15 +481,36 @@ class MainWindow(QMainWindow):
                 self.np_title.setText(str(res))
                 self._status(str(res))
             self.poll_cast()
-        run_async(lambda: self.active.start(path, items, self.auto_next, resume), done)
+        run_async(lambda: self.active.start(path, items, self.auto_next, resume, audio), done)
         self._media = {"audio": [], "subs": [], "chapters": []}
-        self.b_chapters.hide()
+        self.b_chapters.hide(); self.b_audio.hide()
         run_async(lambda: probe.probe(path), self._probe_done)
 
     def _probe_done(self, res):
         self._media = res if isinstance(res, dict) and "chapters" in res else \
             {"audio": [], "subs": [], "chapters": []}
         self.b_chapters.setVisible(bool(self._media.get("chapters")))
+        self.b_audio.setVisible(len(self._media.get("audio", [])) > 1)
+
+    def _audio_menu(self):
+        tracks = self._media.get("audio", [])
+        if len(tracks) < 2:
+            return
+        cur = self._audio if self._audio is not None else \
+            next((t["i"] for t in tracks if t.get("default")), 0)
+        menu = QMenu(self)
+        for t in tracks:
+            mark = "●  " if t["i"] == cur else "     "
+            act = menu.addAction(mark + t["label"])
+            act.triggered.connect(lambda _=False, i=t["i"]: self._select_audio(i))
+        menu.exec(self.b_audio.mapToGlobal(self.b_audio.rect().bottomLeft()))
+
+    def _select_audio(self, i):
+        """Switch audio track by re-casting the current file at its current position."""
+        if not self._now_path or i == self._audio:
+            return
+        pos = self._np_pos + (self._resume_base if self.now_live else 0)
+        self._cast(self._now_path, pos, audio=i)
 
     def _chapters_menu(self):
         chaps = self._media.get("chapters", [])
@@ -548,7 +574,8 @@ class MainWindow(QMainWindow):
         self._now_path = None
         self._np_playing = False
         self._media = {"audio": [], "subs": [], "chapters": []}
-        self.b_chapters.hide()
+        self._audio = None
+        self.b_chapters.hide(); self.b_audio.hide()
         self.np_badge.hide()
         self.np_title.setText("Nothing playing.")
         self.np_bar.setRange(0, 1000)
@@ -660,6 +687,7 @@ class MainWindow(QMainWindow):
             "now": {"title": self.now_title or "", "pos": self._np_pos,
                     "dur": self._np_dur, "state": self._np_state, "live": self.now_live},
             "chapters": self._media.get("chapters", []),
+            "audio": {"tracks": self._media.get("audio", []), "current": self._audio},
         }
 
     def web_add_cast(self, dev):
@@ -715,6 +743,8 @@ class MainWindow(QMainWindow):
                 history.clear()
             elif kind == "jump":
                 self._jump_to(int(p.get("secs", 0) or 0))
+            elif kind == "audio":
+                self._select_audio(int(p.get("i", 0) or 0))
         except Exception as e:
             log.warning("web action %s failed: %s", kind, e)
 

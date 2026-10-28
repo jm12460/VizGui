@@ -10,7 +10,7 @@ from .paths import WRAPPER
 HAS_HW = platforms.hw_encode_args() is not None
 
 
-def write_wrapper(path, copy_video=False, start=0):
+def write_wrapper(path, copy_video=False, start=0, audio=None):
     """Write the helper go-chromecast runs for live streaming. The source path is
     embedded (shell-quoted, so spaces/+/() are safe) and the helper streams the
     video + stereo AAC as fragmented mp4 to stdout. Returns the script path
@@ -32,8 +32,11 @@ def write_wrapper(path, copy_video=False, start=0):
             vin = f"{ss}-i {q}"
             venc = ("-c:v libx264 -preset veryfast -tune zerolatency -crf 23 "
                     "-maxrate 10M -bufsize 20M -g 48 -bf 0")
+    # pick a specific audio track (0-based among audio streams) when asked,
+    # mapping video explicitly so ffmpeg doesn't fall back to its own default
+    maps = f" -map 0:v:0 -map 0:a:{int(audio)}" if audio is not None else ""
     text = ("#!/usr/bin/env bash\n"
-            "exec ffmpeg " + vin + " " + venc +
+            "exec ffmpeg " + vin + maps + " " + venc +
             " -c:a aac -ac 2 -b:a 192k"
             " -movflags frag_keyframe+empty_moov+default_base_moof"
             " -f mp4 -loglevel error pipe:1\n")
