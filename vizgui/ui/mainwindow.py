@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QWidget, QMainWindow, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
     QFrame, QTreeView, QSplitter, QSizePolicy, QFileSystemModel, QProgressBar, QComboBox,
     QDialog, QDialogButtonBox, QMessageBox, QCheckBox, QListWidget, QListWidgetItem, QMenu,
+    QLineEdit, QStackedWidget,
 )
 
 from .. import config
@@ -23,7 +24,7 @@ from ..sources import source_path
 from ..net import local_ip, lan_cidr
 from ..helpers import fmt_time
 from ..qtasync import run_async
-from ..webremote import WebBridge, start_web_server, web_path_ok
+from ..webremote import WebBridge, start_web_server, web_path_ok, web_search
 from ..playback import CastTarget, VlcTarget
 from ..playback import media
 from .remote import RemotePanel
@@ -123,6 +124,19 @@ class MainWindow(QMainWindow):
         hdr.addWidget(self.b_continue)
         hdr.addWidget(self.b_setup)
         bl.addLayout(hdr)
+        # search bar: recursive video-name search within the current source
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("Search videos in this source…")
+        self.search_box.setClearButtonEnabled(True)
+        self.search_box.textChanged.connect(self._on_search_text)
+        self.search_box.returnPressed.connect(self._run_search)
+        bl.addWidget(self.search_box)
+        self._search_timer = QTimer(self)      # debounce typing
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(300)
+        self._search_timer.timeout.connect(self._run_search)
+        self._search_seq = 0                   # drop out-of-order async results
+
         self.model = QFileSystemModel()
         self.model.setNameFilters(VIDEO_GLOBS)
         self.model.setNameFilterDisables(False)
@@ -133,7 +147,14 @@ class MainWindow(QMainWindow):
             self.tree.hideColumn(col)
         self.tree.setHeaderHidden(True)
         self.tree.doubleClicked.connect(self.on_double)
-        bl.addWidget(self.tree)
+        # flat search-results list, shown in place of the tree while searching
+        self.results = QListWidget()
+        self.results.itemActivated.connect(self._result_activated)
+        self.results.itemDoubleClicked.connect(self._result_activated)
+        self.browse_stack = QStackedWidget()
+        self.browse_stack.addWidget(self.tree)        # index 0: folder tree
+        self.browse_stack.addWidget(self.results)     # index 1: search results
+        bl.addWidget(self.browse_stack)
         self._source_changed(self.source_box.currentIndex())  # root at first source
         row = QHBoxLayout()
         self.b_cast = QPushButton("Cast selected"); self.b_cast.setProperty("class", "accent")
@@ -341,6 +362,8 @@ class MainWindow(QMainWindow):
         return False
 
     def _source_changed(self, idx):
+        if getattr(self, "search_box", None) and self.search_box.text():
+            self.search_box.clear()   # results belong to the old source; back to tree
         s = self.source_box.itemData(idx) if idx >= 0 else None
         if not s:
             return
@@ -363,6 +386,55 @@ class MainWindow(QMainWindow):
             return source_path(s)
         except Exception as e:
             return str(e)
+
+    # ---- recursive search within the current source ----
+    def _on_search_text(self, text):
+        if text.strip():
+            self._search_timer.start()        # debounce; fires _run_search
+        else:
+            self._search_timer.stop()
+            self._search_seq += 1             # invalidate any in-flight search
+            self.browse_stack.setCurrentWidget(self.tree)
+
+    def _run_search(self):
+        q = self.search_box.text().strip()
+        if not q:
+            self.browse_stack.setCurrentWidget(self.tree)
+            return
+        src_idx = self.source_box.currentIndex()
+        self._search_seq += 1
+        seq = self._search_seq
+        self.browse_stack.setCurrentWidget(self.results)
+        self.results.clear()
+        self.results.addItem(QListWidgetItem("Searching…"))
+        # web_search is filesystem-only (and may mount an SMB share), so run it off
+        # the GUI thread; ignore it if a newer keystroke already started another.
+        run_async(lambda: web_search(src_idx, q),
+                  lambda res, s=seq, term=q: self._fill_results(res, term, s))
+
+    def _fill_results(self, res, q, seq):
+        if seq != self._search_seq:
+            return                            # superseded by a later search
+        self.results.clear()
+        if not isinstance(res, dict) or not res.get("ok"):
+            err = res.get("error", "search failed") if isinstance(res, dict) else "search failed"
+            self.results.addItem(QListWidgetItem(f"⚠ {err}"))
+            return
+        entries = res.get("entries", [])
+        if not entries:
+            self.results.addItem(QListWidgetItem(f"No videos matching “{q}”."))
+            return
+        for e in entries:
+            it = QListWidgetItem(f"🎬  {e['name']}\n      {e.get('folder') or '/'}")
+            it.setData(Qt.UserRole, e["path"])
+            self.results.addItem(it)
+        if res.get("truncated"):
+            self.results.addItem(QListWidgetItem("… more matches not shown — refine your search."))
+
+    def _result_activated(self, item):
+        path = item.data(Qt.UserRole)
+        if path and os.path.isfile(path):
+            self._play(path)
 
     def _reload_sources(self):
         self.source_box.blockSignals(True)

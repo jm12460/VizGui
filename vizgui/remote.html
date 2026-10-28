@@ -55,6 +55,10 @@ header .t{font-weight:800;font-size:17px}
 .crumb{color:var(--dim);font-size:13px;margin:0 2px 10px;word-break:break-all}
 .list button{display:flex;width:100%;align-items:center;gap:10px;text-align:left;padding:14px 12px;margin-bottom:8px;font-size:15px}
 .list .ic{opacity:.7}
+.list .r2{display:flex;flex-direction:column;min-width:0}
+.list .r2 .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list .r2 .fd{font-size:12px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.srch{width:100%;box-sizing:border-box;padding:12px;margin-bottom:10px;border-radius:12px;background:var(--card);border:1px solid var(--bd);color:var(--txt);font-size:15px}
 /* continue */
 .crow{display:flex;gap:8px;margin-bottom:8px;align-items:stretch}
 .cmain{flex:1;text-align:left;padding:12px;background:var(--btn2)}
@@ -143,6 +147,7 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
 <div id="v-browse" class="view">
  <div class="card">
   <select id="source" onchange="browse(this.value,'')" style="width:100%"></select>
+  <input id="bsearch" class="srch" type="search" placeholder="Search videos in this source…" oninput="onSearch()" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
   <div id="crumb" class="crumb"></div>
   <div id="list" class="list"></div>
   <div id="bmsg" class="msg"></div>
@@ -194,6 +199,7 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
 
 <script>
 let curSrc=0, curSub="", anState=true, lastTargets=null, lastSources=null, CHAPTERS=[], AUDIO={tracks:[],current:null}, SUBS={tracks:[],current:null};
+let searchT=null, searchSeq=0;
 const I_PLAY='M8 5v14l11-7z', I_PAUSE='M6 5h4v14H6zm8 0h4v14h-4z';
 if(location.hash.indexOf('t=')>=0){try{localStorage.setItem('viztoken',decodeURIComponent(location.hash.split('t=')[1]));history.replaceState(null,'',location.pathname);}catch(e){}}
 let TOKEN=localStorage.getItem('viztoken')||'';
@@ -260,6 +266,8 @@ async function loadSources(){const d=await api('/api/status');const s=$('source'
  if((d.sources||[]).length){s.value=curSrc;browse(curSrc,curSub);}else{$('bmsg').textContent='No sources configured.';$('list').replaceChildren();}
 }
 async function browse(src,sub){curSrc=+src;curSub=sub;
+ searchSeq++;clearTimeout(searchT);                 // cancel any pending search
+ const sb=$('bsearch');if(sb&&document.activeElement!==sb)sb.value='';
  const d=await api('/api/browse?src='+src+'&sub='+encodeURIComponent(sub));
  const list=$('list'),msg=$('bmsg');msg.textContent='';
  if(!d.ok){list.replaceChildren();msg.textContent=d.error||'Could not open source.';return;}
@@ -271,6 +279,27 @@ async function browse(src,sub){curSrc=+src;curSub=sub;
   else list.appendChild(listRow('🎬',e.name,()=>castFile(e.path,e.name)));}
  if(!list.children.length)list.appendChild(msgDiv('Empty.'));
 }
+function onSearch(){clearTimeout(searchT);const q=$('bsearch').value.trim();
+ if(!q){browse(curSrc,curSub);return;}
+ searchT=setTimeout(()=>runSearch(q),300);}        // debounce typing
+async function runSearch(q){const seq=++searchSeq;
+ const list=$('list'),msg=$('bmsg');msg.textContent='Searching…';
+ const d=await api('/api/search?src='+curSrc+'&q='+encodeURIComponent(q));
+ if(seq!==searchSeq)return;                         // a newer search superseded this
+ if(!d.ok){list.replaceChildren();msg.textContent=d.error||'Search failed.';return;}
+ msg.textContent='';$('crumb').textContent='Search: '+q;
+ list.replaceChildren();
+ if(!d.entries.length){list.appendChild(msgDiv('No videos matching “'+q+'”.'));return;}
+ for(const e of d.entries)list.appendChild(resultRow(e));
+ if(d.truncated)list.appendChild(msgDiv('… more matches not shown — refine your search.'));
+}
+function resultRow(e){const b=document.createElement('button');
+ const ic=document.createElement('span');ic.className='ic';ic.textContent='🎬';
+ const col=document.createElement('span');col.className='r2';
+ const n=document.createElement('span');n.className='nm';n.textContent=e.name;
+ const f=document.createElement('span');f.className='fd';f.textContent=e.folder||'/';
+ col.appendChild(n);col.appendChild(f);b.appendChild(ic);b.appendChild(col);
+ b.addEventListener('click',()=>castFile(e.path,e.name));return b;}
 async function castFile(path,name){const b=$('bmsg');b.textContent='Casting '+name+'…';
  await cmd({kind:'cast',path:path});setTimeout(poll,400);}
 /* ---- chapters (overlay) ---- */

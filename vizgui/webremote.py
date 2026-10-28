@@ -65,6 +65,9 @@ class _WebHandler(BaseHTTPRequestHandler):
         if u.path == "/api/browse":
             q = urllib.parse.parse_qs(u.query)
             return self._json(web_browse(int(q.get("src", ["0"])[0]), q.get("sub", [""])[0]))
+        if u.path == "/api/search":
+            q = urllib.parse.parse_qs(u.query)
+            return self._json(web_search(int(q.get("src", ["0"])[0]), q.get("q", [""])[0]))
         if u.path == "/api/scan":
             return self._json({"ok": True, "devices": scan_cast_devices()})
         if u.path == "/api/history":
@@ -124,6 +127,40 @@ def web_browse(src_idx, sub):
     if up == ".":
         up = ""
     return {"ok": True, "src": src_idx, "sub": sub, "up": up, "entries": entries}
+
+
+def web_search(src_idx, query, limit=300):
+    """Recursive video-file name search within one source root (confined to it).
+    Case-insensitive substring match on the filename. Returns a flat list so the
+    phone/desktop can show matches without clicking through folders. Filesystem
+    only (no Qt), so it's safe on the HTTP thread or a worker thread."""
+    srcs = config.CFG.get("sources", [])
+    if not (0 <= src_idx < len(srcs)):
+        return {"ok": False, "error": "no such source"}
+    q = (query or "").strip().lower()
+    if not q:
+        return {"ok": True, "src": src_idx, "query": "", "entries": []}
+    try:
+        base = source_path(srcs[src_idx])
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    real_base = os.path.realpath(base)
+    exts = tuple(g[1:] for g in VIDEO_GLOBS)
+    out = []
+    for root, dirs, files in os.walk(real_base):   # followlinks=False -> no loops
+        dirs[:] = sorted((d for d in dirs if not d.startswith(".")), key=str.lower)
+        for nm in sorted(files, key=str.lower):
+            if nm.startswith(".") or not nm.lower().endswith(exts):
+                continue
+            if q in nm.lower():
+                full = os.path.join(root, nm)
+                rel = os.path.relpath(full, real_base)
+                out.append({"name": nm, "rel": rel, "path": full,
+                            "folder": os.path.dirname(rel)})
+                if len(out) >= limit:
+                    return {"ok": True, "src": src_idx, "query": query,
+                            "entries": out, "truncated": True}
+    return {"ok": True, "src": src_idx, "query": query, "entries": out}
 
 
 def web_path_ok(path):

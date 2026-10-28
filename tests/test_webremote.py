@@ -64,3 +64,52 @@ def test_web_path_ok_blocks_traversal_out_of_source():
         with mock.patch.object(config, "CFG", {"sources": [{"name": "T", "path": d}]}):
             # a crafted ../ path that resolves outside the root is rejected
             assert webremote.web_path_ok(os.path.join(d, "..", "etc", "passwd")) is False
+
+
+def test_web_search_recursive_substring_match():
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "Season 1"))
+        os.makedirs(os.path.join(d, "Season 2"))
+        open(os.path.join(d, "Season 1", "Alien.mkv"), "w").close()
+        open(os.path.join(d, "Season 2", "aliens.mp4"), "w").close()  # case-insensitive
+        open(os.path.join(d, "Season 2", "Predator.mp4"), "w").close()
+        open(os.path.join(d, "Season 1", "notes.txt"), "w").close()   # not a video
+        with mock.patch.object(config, "CFG", {"sources": [{"name": "T", "path": d}]}):
+            r = webremote.web_search(0, "alien")
+    assert r["ok"] is True
+    names = sorted(e["name"] for e in r["entries"])
+    assert names == ["Alien.mkv", "aliens.mp4"]
+    # folder is relative to the source root, path is absolute within it
+    by_name = {e["name"]: e for e in r["entries"]}
+    assert by_name["Alien.mkv"]["folder"] == "Season 1"
+    assert by_name["Alien.mkv"]["path"].endswith("Season 1/Alien.mkv")
+
+
+def test_web_search_empty_query_returns_nothing():
+    with mock.patch.object(config, "CFG", {"sources": [{"name": "T", "path": "/x"}]}):
+        r = webremote.web_search(0, "   ")
+    assert r["ok"] is True and r["entries"] == []
+
+
+def test_web_search_bad_source_index():
+    with mock.patch.object(config, "CFG", {"sources": []}):
+        assert webremote.web_search(0, "x")["ok"] is False
+
+
+def test_web_search_truncates_at_limit():
+    with tempfile.TemporaryDirectory() as d:
+        for i in range(5):
+            open(os.path.join(d, f"movie{i}.mp4"), "w").close()
+        with mock.patch.object(config, "CFG", {"sources": [{"name": "T", "path": d}]}):
+            r = webremote.web_search(0, "movie", limit=3)
+    assert r["ok"] is True and len(r["entries"]) == 3 and r.get("truncated") is True
+
+
+def test_web_search_results_pass_path_confinement():
+    # every search hit must be castable (web_path_ok must accept it)
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "sub"))
+        open(os.path.join(d, "sub", "clip.mp4"), "w").close()
+        with mock.patch.object(config, "CFG", {"sources": [{"name": "T", "path": d}]}):
+            r = webremote.web_search(0, "clip")
+            assert all(webremote.web_path_ok(e["path"]) for e in r["entries"])
