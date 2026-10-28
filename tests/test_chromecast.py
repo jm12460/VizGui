@@ -29,3 +29,12 @@ def test_scan_skips_lines_without_address():
     with mock.patch.object(chromecast.subprocess, "run",
                            return_value=types.SimpleNamespace(stdout=out, returncode=0)):
         assert chromecast.scan_cast_devices() == []
+
+
+def test_gc_returns_gracefully_without_device():
+    # no cast device configured -> don't invoke go-chromecast with a None address
+    with mock.patch.object(chromecast.config, "TV_IP", None), \
+         mock.patch.object(chromecast.subprocess, "run",
+                           side_effect=AssertionError("must not run gc without a device")):
+        ok, msg = chromecast.gc("status")
+    assert ok is False and "no cast device" in msg

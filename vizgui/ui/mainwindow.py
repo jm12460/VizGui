@@ -141,6 +141,14 @@ class MainWindow(QMainWindow):
         self.target_box = QComboBox()
         self._reload_targets()
         self.target_box.currentIndexChanged.connect(self._target_changed)
+        # sync the active target to the configured selection, so a VLC-only setup
+        # doesn't leave 'cast' active and poll go-chromecast with no device
+        t0 = self.target_box.currentData()
+        if t0:
+            self.target = t0.get("type", "cast")
+            self.active = self.targets.get(self.target, self.targets["cast"])
+            if self.target == "cast":
+                config.set_active_cast(t0)
         row.addWidget(self.b_cast)
         row.addWidget(QLabel("→"))
         row.addWidget(self.target_box)

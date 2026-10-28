@@ -8,6 +8,8 @@ from .paths import GC, log
 
 def gc(*args, timeout=15):
     """Run go-chromecast against the active Cast device, return (ok, output)."""
+    if not config.TV_IP:
+        return False, "no cast device configured"
     try:
         p = subprocess.run([GC, "--addr", config.TV_IP, "--port", config.CAST_PORT, *args],
                            capture_output=True, text=True, timeout=timeout)
