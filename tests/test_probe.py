@@ -47,3 +47,15 @@ def test_external_subs_discovered():
 
 def test_parse_empty_on_no_data():
     assert probe.parse({}) == {"audio": [], "subs": [], "chapters": []}
+
+
+def test_parse_subtitle_kind_and_si():
+    data = {"streams": [
+        {"codec_type": "subtitle", "index": 2, "codec_name": "subrip",
+         "tags": {"language": "eng"}, "disposition": {}},
+        {"codec_type": "subtitle", "index": 3, "codec_name": "hdmv_pgs_subtitle",
+         "tags": {"language": "eng"}, "disposition": {}},
+    ]}
+    s = probe.parse(data)["subs"]
+    assert s[0]["kind"] == "text" and s[0]["si"] == 0
+    assert s[1]["kind"] == "image" and s[1]["si"] == 1

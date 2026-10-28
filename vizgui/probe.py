@@ -11,6 +11,10 @@ from . import platforms
 from .paths import log
 
 SUB_EXTS = (".srt", ".ass", ".ssa", ".vtt", ".sub")
+# image-based subtitle codecs can't be burned with the text `subtitles` filter;
+# they're composited with `overlay` instead.
+IMAGE_SUB_CODECS = ("hdmv_pgs_subtitle", "pgssub", "dvd_subtitle", "dvdsub",
+                    "dvb_subtitle", "xsub")
 
 
 def _ffprobe_json(path):
@@ -47,9 +51,11 @@ def parse(data, path="", listdir=os.listdir):
                           "label": _label(tags, f"Audio {len(audio) + 1}") + suffix,
                           "codec": s.get("codec_name", ""), "default": bool(disp.get("default"))})
         elif kind == "subtitle":
-            subs.append({"i": len(subs), "stream": s.get("index"),
+            codec = s.get("codec_name", "")
+            subs.append({"i": len(subs), "si": len(subs), "stream": s.get("index"),
                          "label": _label(tags, f"Subtitle {len(subs) + 1}"),
-                         "codec": s.get("codec_name", ""), "external": None,
+                         "codec": codec, "external": None,
+                         "kind": "image" if codec in IMAGE_SUB_CODECS else "text",
                          "default": bool(disp.get("default")), "forced": bool(disp.get("forced"))})
     for c in data.get("chapters", []):
         try:
@@ -75,8 +81,8 @@ def _external_subs(path, start_i, listdir):
         return []
     for nm in sorted(names):
         if os.path.splitext(nm)[1].lower() in SUB_EXTS and nm.lower().startswith(stem):
-            out.append({"i": start_i + len(out), "stream": None, "label": nm,
-                        "codec": os.path.splitext(nm)[1].lstrip("."),
+            out.append({"i": start_i + len(out), "si": None, "stream": None, "label": nm,
+                        "codec": os.path.splitext(nm)[1].lstrip("."), "kind": "text",
                         "external": os.path.join(folder, nm), "default": False, "forced": False})
     return out
 

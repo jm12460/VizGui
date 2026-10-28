@@ -143,8 +143,8 @@ def test_cast_audio_forces_remux_on_direct():
     t = targets.CastTarget()
     ww = {}
 
-    def fake_ww(path, copy_video=False, start=0, audio=None):
-        ww.update(copy_video=copy_video, audio=audio)
+    def fake_ww(path, copy_video=False, start=0, audio=None, sub=None):
+        ww.update(copy_video=copy_video, audio=audio, sub=sub)
         return "/tmp/w.sh"
 
     with mock.patch.object(targets, "gc", return_value=(True, "")), \
@@ -157,3 +157,24 @@ def test_cast_audio_forces_remux_on_direct():
         res = t.start("/m/x.mp4", ["/m/x.mp4"], False, resume=0, audio=1)
     assert res == "playing" and t.live is True
     assert ww.get("copy_video") is True and ww.get("audio") == 1
+
+
+def test_cast_sub_forces_transcode():
+    t = targets.CastTarget()
+    ww = {}
+
+    def fake_ww(path, copy_video=False, start=0, audio=None, sub=None):
+        ww.update(copy_video=copy_video, sub=sub)
+        return "/tmp/w.sh"
+
+    with mock.patch.object(targets, "gc", return_value=(True, "")), \
+         mock.patch.object(targets.media, "vcodec", return_value="h264"), \
+         mock.patch.object(targets, "write_wrapper", fake_ww), \
+         mock.patch.object(targets, "prepare_subtitle", return_value={"kind": "text", "file": "/c/s.ass"}), \
+         mock.patch.object(targets.platforms, "has_tool", return_value=True), \
+         mock.patch.object(targets.platforms, "launch_caster",
+                           return_value=mock.Mock(poll=lambda: None, pid=1, returncode=0)), \
+         mock.patch.object(targets.time, "sleep", lambda *a: None):
+        res = t.start("/m/x.mp4", ["/m/x.mp4"], False, sub={"i": 0, "kind": "text", "si": 0})
+    assert res == "playing" and t.live is True
+    assert ww.get("copy_video") is False and ww.get("sub") == {"kind": "text", "file": "/c/s.ass"}

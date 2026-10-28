@@ -80,6 +80,7 @@ class MainWindow(QMainWindow):
         self._last_save = 0.0       # throttle history writes during playback
         self._media = {"audio": [], "subs": [], "chapters": []}   # ffprobe of current file
         self._audio = None          # selected audio track (0-based), None = file default
+        self._sub = None            # selected subtitle (probe descriptor), None = off
 
         root = QWidget(); self.setCentralWidget(root)
         outer = QHBoxLayout(root)
@@ -152,6 +153,8 @@ class MainWindow(QMainWindow):
         nhdr = QHBoxLayout()
         nt = QLabel("NOW PLAYING"); nt.setObjectName("title")
         self.np_badge = QLabel("● LIVE"); self.np_badge.setObjectName("badge"); self.np_badge.hide()
+        self.b_subs = QPushButton("Subtitles ▾"); self.b_subs.hide()
+        self.b_subs.clicked.connect(self._subs_menu)
         self.b_audio = QPushButton("Audio ▾"); self.b_audio.hide()
         self.b_audio.clicked.connect(self._audio_menu)
         self.b_chapters = QPushButton("Chapters ▾"); self.b_chapters.hide()
@@ -160,6 +163,7 @@ class MainWindow(QMainWindow):
         self.autonext_cb.setChecked(self.auto_next)
         self.autonext_cb.toggled.connect(self._set_autonext)
         nhdr.addWidget(nt); nhdr.addStretch(1); nhdr.addWidget(self.np_badge)
+        nhdr.addWidget(self.b_subs)
         nhdr.addWidget(self.b_audio)
         nhdr.addWidget(self.b_chapters)
         nhdr.addWidget(self.autonext_cb)
@@ -445,11 +449,12 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _cast(self, path, resume=0, audio=None):
+    def _cast(self, path, resume=0, audio=None, sub=None):
         self._remember()                 # save position of the file we're leaving
         self._now_path = path
         self._resume_base = resume
         self._audio = audio
+        self._sub = sub
         self._last_save = time.time()
         self._saw_playing = False
         self._user_stopped = False
@@ -481,9 +486,9 @@ class MainWindow(QMainWindow):
                 self.np_title.setText(str(res))
                 self._status(str(res))
             self.poll_cast()
-        run_async(lambda: self.active.start(path, items, self.auto_next, resume, audio), done)
+        run_async(lambda: self.active.start(path, items, self.auto_next, resume, audio, sub), done)
         self._media = {"audio": [], "subs": [], "chapters": []}
-        self.b_chapters.hide(); self.b_audio.hide()
+        self.b_chapters.hide(); self.b_audio.hide(); self.b_subs.hide()
         run_async(lambda: probe.probe(path), lambda r: self._probe_done(path, r))
 
     def _probe_done(self, path, res):
@@ -493,6 +498,34 @@ class MainWindow(QMainWindow):
             {"audio": [], "subs": [], "chapters": []}
         self.b_chapters.setVisible(bool(self._media.get("chapters")))
         self.b_audio.setVisible(len(self._media.get("audio", [])) > 1)
+        self.b_subs.setVisible(bool(self._media.get("subs")))
+
+    def _subs_menu(self):
+        subs = self._media.get("subs", [])
+        if not subs:
+            return
+        menu = QMenu(self)
+        off = menu.addAction(("●  " if self._sub is None else "     ") + "Off")
+        off.triggered.connect(lambda: self._select_sub(None))
+        menu.addSeparator()
+        for s in subs:
+            active = self._sub is not None and self._sub.get("i") == s["i"]
+            extra = ("  (image)" if s.get("kind") == "image" else "") + \
+                    ("  [file]" if s.get("external") else "")
+            act = menu.addAction(("●  " if active else "     ") + s["label"] + extra)
+            act.triggered.connect(lambda _=False, sub=s: self._select_sub(sub))
+        menu.exec(self.b_subs.mapToGlobal(self.b_subs.rect().bottomLeft()))
+
+    def _select_sub(self, sub):
+        """Turn subtitles on/off by re-casting at the current position (keeps audio)."""
+        if not self._now_path:
+            return
+        cur = self._sub.get("i") if self._sub else None
+        new = sub.get("i") if sub else None
+        if cur == new:
+            return
+        pos = self._np_pos + (self._resume_base if self.now_live else 0)
+        self._cast(self._now_path, pos, audio=self._audio, sub=sub)
 
     def _audio_menu(self):
         tracks = self._media.get("audio", [])
@@ -512,7 +545,7 @@ class MainWindow(QMainWindow):
         if not self._now_path or i == self._audio:
             return
         pos = self._np_pos + (self._resume_base if self.now_live else 0)
-        self._cast(self._now_path, pos, audio=i)
+        self._cast(self._now_path, pos, audio=i, sub=self._sub)
 
     def _chapters_menu(self):
         chaps = self._media.get("chapters", [])
@@ -529,7 +562,7 @@ class MainWindow(QMainWindow):
         it at the offset; direct cast and VLC seek in place."""
         secs = int(secs)
         if self.now_live and self._now_path:
-            self._cast(self._now_path, secs)
+            self._cast(self._now_path, secs, audio=self._audio, sub=self._sub)
         else:
             run_async(lambda: self.active.seek_to(secs), lambda _: self.poll_cast())
 
@@ -577,7 +610,8 @@ class MainWindow(QMainWindow):
         self._np_playing = False
         self._media = {"audio": [], "subs": [], "chapters": []}
         self._audio = None
-        self.b_chapters.hide(); self.b_audio.hide()
+        self._sub = None
+        self.b_chapters.hide(); self.b_audio.hide(); self.b_subs.hide()
         self.np_badge.hide()
         self.np_title.setText("Nothing playing.")
         self.np_bar.setRange(0, 1000)
@@ -690,6 +724,8 @@ class MainWindow(QMainWindow):
                     "dur": self._np_dur, "state": self._np_state, "live": self.now_live},
             "chapters": self._media.get("chapters", []),
             "audio": {"tracks": self._media.get("audio", []), "current": self._audio},
+            "subs": {"tracks": self._media.get("subs", []),
+                     "current": self._sub.get("i") if self._sub else None},
         }
 
     def web_add_cast(self, dev):
@@ -747,6 +783,11 @@ class MainWindow(QMainWindow):
                 self._jump_to(int(p.get("secs", 0) or 0))
             elif kind == "audio":
                 self._select_audio(int(p.get("i", 0) or 0))
+            elif kind == "sub":
+                i = p.get("i")
+                s = None if i is None else next(
+                    (x for x in self._media.get("subs", []) if x.get("i") == int(i)), None)
+                self._select_sub(s)
         except Exception as e:
             log.warning("web action %s failed: %s", kind, e)
 
@@ -775,10 +816,11 @@ class MainWindow(QMainWindow):
             self._now_path = None
             self._media = {"audio": [], "subs": [], "chapters": []}
             self._audio = None
+            self._sub = None
             if self.target == "cast":
                 history.clear_current()
             self.np_badge.hide()
-            self.b_chapters.hide(); self.b_audio.hide()
+            self.b_chapters.hide(); self.b_audio.hide(); self.b_subs.hide()
             self.np_title.setText("Nothing playing.")
             self.np_bar.setRange(0, 1000); self.np_bar.setValue(0)
             self.np_time.setText("")

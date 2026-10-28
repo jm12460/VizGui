@@ -110,6 +110,7 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
    <button onclick="tr('forward')" title="Forward 30s"><svg class="ti" viewBox="0 0 24 24"><g transform="translate(24,0) scale(-1,1)"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></g><text x="12" y="15.3" text-anchor="middle" style="font-size:7px;font-weight:800;font-family:-apple-system,sans-serif">30</text></svg></button>
   </div>
   <div class="trow" style="margin-top:8px">
+   <button id="subbtn" onclick="openSubs()" style="display:none;font-size:13px;padding:8px">Subs</button>
    <button id="audbtn" onclick="openAudio()" style="display:none;font-size:13px;padding:8px">Audio</button>
    <button id="chbtn" onclick="openChapters()" style="display:none;font-size:13px;padding:8px">Chapters</button>
   </div>
@@ -168,6 +169,12 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
  <button onclick="closeAudio()" style="margin-top:12px;padding:14px">Done</button>
 </div>
 
+<div id="subs" class="overlay">
+ <h2>Subtitles</h2>
+ <div id="sublist"></div>
+ <button onclick="closeSubs()" style="margin-top:12px;padding:14px">Done</button>
+</div>
+
 <div id="settings" class="overlay">
  <h2>Settings</h2>
  <div class="set-row"><div class="sect">AUTO-PLAY NEXT</div>
@@ -186,7 +193,7 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
 </nav>
 
 <script>
-let curSrc=0, curSub="", anState=true, lastTargets=null, lastSources=null, CHAPTERS=[], AUDIO={tracks:[],current:null};
+let curSrc=0, curSub="", anState=true, lastTargets=null, lastSources=null, CHAPTERS=[], AUDIO={tracks:[],current:null}, SUBS={tracks:[],current:null};
 const I_PLAY='M8 5v14l11-7z', I_PAUSE='M6 5h4v14H6zm8 0h4v14h-4z';
 if(location.hash.indexOf('t=')>=0){try{localStorage.setItem('viztoken',decodeURIComponent(location.hash.split('t=')[1]));history.replaceState(null,'',location.pathname);}catch(e){}}
 let TOKEN=localStorage.getItem('viztoken')||'';
@@ -231,6 +238,7 @@ async function poll(){const d=await api('/api/status');if(!d.ok)return;
  lastSources=JSON.stringify(d.sources||[]);
  CHAPTERS=d.chapters||[];$('chbtn').style.display=CHAPTERS.length?'':'none';
  AUDIO=d.audio||{tracks:[],current:null};$('audbtn').style.display=(AUDIO.tracks.length>1)?'':'none';
+ SUBS=d.subs||{tracks:[],current:null};$('subbtn').style.display=(SUBS.tracks.length)?'':'none';
 }
 function toggleAN(){anState=!anState;cmd({kind:'autonext',on:anState});const an=$('anbtn');an.textContent='Auto-next: '+(anState?'on':'off');an.classList.toggle('ac',anState);}
 /* ---- settings ---- */
@@ -281,6 +289,19 @@ function openAudio(){const list=$('audlist');list.replaceChildren();
  $('audio').classList.add('on');}
 function closeAudio(){$('audio').classList.remove('on');}
 function selectAudio(i){cmd({kind:'audio',i:i});closeAudio();setTimeout(poll,700);}
+/* ---- subtitles (overlay) ---- */
+function subRow(label,active,onClick){const b=document.createElement('button');
+ b.style.cssText='display:block;width:100%;text-align:left;padding:13px;margin-bottom:8px';
+ b.textContent=(active?'●  ':'     ')+label;b.addEventListener('click',onClick);return b;}
+function openSubs(){const list=$('sublist');list.replaceChildren();
+ const cur=SUBS.current;
+ list.appendChild(subRow('Off',cur==null,()=>selectSub(null)));
+ for(const s of (SUBS.tracks||[])){
+  const extra=(s.kind==='image'?'  (image)':'')+(s.external?'  [file]':'');
+  list.appendChild(subRow((s.label||('Subtitle '+(s.i+1)))+extra, s.i===cur, ()=>selectSub(s.i)));}
+ $('subs').classList.add('on');}
+function closeSubs(){$('subs').classList.remove('on');}
+function selectSub(i){cmd({kind:'sub',i:i});closeSubs();setTimeout(poll,900);}
 /* ---- continue watching (overlay, like settings) ---- */
 function openContinue(){loadContinue();$('continue').classList.add('on');}
 function closeContinue(){$('continue').classList.remove('on');}

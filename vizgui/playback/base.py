@@ -21,11 +21,11 @@ class PlaybackTarget:
         """-> (ok, message). ok False means a required tool is missing."""
         return True, ""
 
-    def start(self, path, items, auto_next, resume=0, audio=None):
-        """Begin playing `path`, optionally seeking to `resume` seconds and
-        selecting audio track `audio` (0-based among audio streams, None = file
-        default). `items` is the folder queue from `path` onward (for targets with
-        native playlists). Returns "playing" or an error string."""
+    def start(self, path, items, auto_next, resume=0, audio=None, sub=None):
+        """Begin playing `path`, optionally seeking to `resume` seconds, selecting
+        audio track `audio` (0-based, None = default), and showing subtitle `sub`
+        (a probe sub descriptor, or None for off). `items` is the folder queue from
+        `path` onward. Returns "playing" or an error string."""
         raise NotImplementedError
 
     def stop(self):

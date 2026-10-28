@@ -55,3 +55,23 @@ def test_wrapper_audio_map():
              mock.patch.object(transcode.platforms, "hw_encode_args", return_value=None):
             assert "-map 0:v:0 -map 0:a:2" in open(transcode.write_wrapper("/m/x.mkv", True, audio=2)).read()
             assert "-map 0:a" not in open(transcode.write_wrapper("/m/x.mkv", True)).read()
+
+
+def test_wrapper_text_sub_burns_via_vf():
+    with tempfile.TemporaryDirectory() as d:
+        wp = os.path.join(d, "t.sh")
+        with mock.patch.object(transcode, "WRAPPER", wp), \
+             mock.patch.object(transcode.platforms, "hw_encode_args", return_value=None):
+            t = open(transcode.write_wrapper("/m/x.mkv", copy_video=True,
+                                             sub={"kind": "text", "file": "/c/vizsub.ass"})).read()
+    assert "-vf subtitles=/c/vizsub.ass" in t
+    assert "-c:v copy" not in t   # a subtitle forces a re-encode
+
+
+def test_wrapper_image_sub_overlays():
+    with tempfile.TemporaryDirectory() as d:
+        wp = os.path.join(d, "t.sh")
+        with mock.patch.object(transcode, "WRAPPER", wp), \
+             mock.patch.object(transcode.platforms, "hw_encode_args", return_value=None):
+            t = open(transcode.write_wrapper("/m/x.mkv", sub={"kind": "image", "si": 2})).read()
+    assert "overlay" in t and "0:s:2" in t and "-map '[vo]'" in t

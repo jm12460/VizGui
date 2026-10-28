@@ -14,7 +14,7 @@ from .. import platforms
 from .. import health
 from ..paths import GC, CACHE, CASTER_LOG, log
 from ..chromecast import gc
-from ..transcode import write_wrapper, HAS_HW
+from ..transcode import write_wrapper, prepare_subtitle, HAS_HW
 from ..helpers import cast_plan, parse_status
 from ..vlc import (vlc_cmd, vlc_status, vlc_any_status, mpris_cmd, mpris_running,
                    path_to_uri, VLC_PORT, VLC_PW)
@@ -51,9 +51,11 @@ class CastTarget(PlaybackTarget):
             if not line or "Idle" in line or "Backdrop" in line:
                 return
 
-    def start(self, path, items, auto_next, resume=0, audio=None):
+    def start(self, path, items, auto_next, resume=0, audio=None, sub=None):
         plan = cast_plan(media.vcodec(path), os.path.splitext(path)[1])
-        if plan == "direct" and audio is not None:
+        if sub is not None:
+            plan = "transcode"     # burning a subtitle requires re-encoding the video
+        elif plan == "direct" and audio is not None:
             plan = "remux"         # selecting a non-default audio needs a re-map
         self.live = plan != "direct"
         if self.live and not platforms.has_tool("ffmpeg"):
@@ -70,7 +72,9 @@ class CastTarget(PlaybackTarget):
             what = "direct"
         else:
             # a live stream resumes by seeking the input (-ss); it begins at `resume`
-            wrapper = write_wrapper(path, copy_video=(plan == "remux"), start=resume, audio=audio)
+            sub_desc = prepare_subtitle(path, sub) if sub else None
+            wrapper = write_wrapper(path, copy_video=(plan == "remux"), start=resume,
+                                    audio=audio, sub=sub_desc)
             self.handle = platforms.launch_caster(
                 base + ["transcode", "--content-type", "video/mp4", "--command", wrapper],
                 log_path=CASTER_LOG)
@@ -133,7 +137,7 @@ class VlcTarget(PlaybackTarget):
             return False, "VLC isn't installed — can't use the VLC target."
         return True, ""
 
-    def start(self, path, items, auto_next, resume=0, audio=None):
+    def start(self, path, items, auto_next, resume=0, audio=None, sub=None):
         # 1) Our HTTP VLC is running -> send the whole folder as a native playlist.
         if "error" not in vlc_status():
             self.mode = "http"
@@ -162,6 +166,11 @@ class VlcTarget(PlaybackTarget):
         start_arg = [f"--start-time={int(resume)}"] if resume else []
         if audio is not None:
             start_arg.append(f"--audio-track={int(audio)}")
+        if sub:
+            if sub.get("external"):
+                start_arg.append(f"--sub-file={sub['external']}")
+            elif sub.get("si") is not None:
+                start_arg.append(f"--sub-track={int(sub['si'])}")
         self.proc = platforms.launch_detached(
             [platforms.vlc_exe(), "--extraintf", "http", "--http-host", "127.0.0.1",
              "--http-port", str(VLC_PORT), "--http-password", VLC_PW,
