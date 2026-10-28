@@ -57,6 +57,13 @@ def test_linux_find_mount_none_without_gvfs():
         assert linux.find_mount("srv", "sh") is None
 
 
+def test_linux_find_mount_handles_url_encoded_spaces():
+    with mock.patch.object(linux, "_gvfs_dir", return_value="/tmp/fakegvfs"), \
+         mock.patch.object(linux.os, "listdir", return_value=["smb-share:server=nas,share=all%20videos"]), \
+         mock.patch.object(linux.os.path, "isdir", return_value=True):
+        assert linux.find_mount("nas", "all Videos") == "/tmp/fakegvfs/smb-share:server=nas,share=all%20videos"
+
+
 def test_base_find_tool_prefers_path():
     with mock.patch.object(base.shutil, "which", return_value="/usr/bin/ffmpeg"):
         assert base.find_tool("ffmpeg") == "/usr/bin/ffmpeg"

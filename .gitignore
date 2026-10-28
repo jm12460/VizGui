@@ -16,3 +16,5 @@ packaging/*/.SRCINFO
 packaging/*/*.log
 # vizgui-git clones the repo into this subdir while building:
 packaging/vizgui-git/vizgui/
+.aider*
+uv.lock
