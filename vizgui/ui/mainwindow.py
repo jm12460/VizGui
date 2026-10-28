@@ -3,7 +3,7 @@ remote, and status together."""
 import os
 import secrets
 import time
-from PySide6.QtCore import Qt, QTimer, QDir, QModelIndex
+from PySide6.QtCore import Qt, QTimer, QDir, QModelIndex, QSize
 from PySide6.QtGui import QPixmap, QImage, QPainter, QColor
 from PySide6.QtWidgets import (
     QWidget, QMainWindow, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -146,9 +146,15 @@ class MainWindow(QMainWindow):
         for col in (1, 2, 3):
             self.tree.hideColumn(col)
         self.tree.setHeaderHidden(True)
+        self.tree.setIconSize(QSize(18, 18))
+        self.tree.setIndentation(16)
+        self.tree.setAnimated(True)              # smooth expand/collapse
+        self.tree.setUniformRowHeights(True)     # consistent rows + faster
         self.tree.doubleClicked.connect(self.on_double)
         # flat search-results list, shown in place of the tree while searching
         self.results = QListWidget()
+        self.results.setIconSize(QSize(18, 18))
+        self.results.setSpacing(1)
         self.results.itemActivated.connect(self._result_activated)
         self.results.itemDoubleClicked.connect(self._result_activated)
         self.browse_stack = QStackedWidget()

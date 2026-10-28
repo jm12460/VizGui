@@ -40,11 +40,18 @@ QPushButton#power:hover { background: #f05b60; }
 
 QTreeView, QListWidget {
     background: #0f1217; border: 1px solid #242a33; border-radius: 12px;
-    padding: 4px; outline: 0;
+    padding: 6px; outline: 0;
 }
-QTreeView::item, QListWidget::item { padding: 5px 6px; border-radius: 6px; }
-QTreeView::item:hover, QListWidget::item:hover { background: #191e27; }
+QTreeView { show-decoration-selected: 1; }   /* selection spans the whole row */
+QTreeView::item, QListWidget::item { padding: 8px 8px; color: #d4d9e1; }
+QListWidget::item { border-radius: 8px; }    /* search results read as chips */
+QTreeView::item:hover, QListWidget::item:hover { background: #1a2029; color: #eef1f5; }
 QTreeView::item:selected, QListWidget::item:selected { background: #3f7bff; color: #ffffff; }
+/* fill the branch gutter to match the row's state, so the selection/hover is one
+   clean bar instead of a blue bar with a dark notch punched out around the arrow */
+QTreeView::branch { background: transparent; }
+QTreeView::branch:hover { background: #1a2029; }
+QTreeView::branch:selected { background: #3f7bff; }
 
 QComboBox { background: #232832; border: 1px solid #2d343f; border-radius: 9px;
     padding: 5px 10px; min-height: 18px; }
