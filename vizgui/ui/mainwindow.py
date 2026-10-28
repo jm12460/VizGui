@@ -28,6 +28,7 @@ from ..webremote import WebBridge, start_web_server, web_path_ok, web_search
 from ..playback import CastTarget, VlcTarget
 from ..playback import media
 from .remote import RemotePanel
+from .icons import ThemedIconProvider
 from .dialogs import SetupDialog, SmbDialog
 
 
@@ -141,6 +142,8 @@ class MainWindow(QMainWindow):
         self.model.setNameFilters(VIDEO_GLOBS)
         self.model.setNameFilterDisables(False)
         self.model.setFilter(QDir.AllDirs | QDir.Files | QDir.NoDotAndDotDot)
+        self._icon_provider = ThemedIconProvider()   # flat folder/video glyphs
+        self.model.setIconProvider(self._icon_provider)
         self.tree = QTreeView()
         self.tree.setModel(self.model)
         for col in (1, 2, 3):
@@ -150,6 +153,8 @@ class MainWindow(QMainWindow):
         self.tree.setIndentation(16)
         self.tree.setAnimated(True)              # smooth expand/collapse
         self.tree.setUniformRowHeights(True)     # consistent rows + faster
+        self.tree.setExpandsOnDoubleClick(False)  # folders toggle on a single click
+        self.tree.clicked.connect(self._on_tree_click)
         self.tree.doubleClicked.connect(self.on_double)
         # flat search-results list, shown in place of the tree while searching
         self.results = QListWidget()
@@ -279,6 +284,11 @@ class MainWindow(QMainWindow):
             return None
         p = self.model.filePath(idx)
         return p if os.path.isfile(p) else None
+
+    def _on_tree_click(self, idx):
+        """Single click toggles a folder open/closed (files just select)."""
+        if idx.isValid() and self.model.isDir(idx):
+            self.tree.setExpanded(idx, not self.tree.isExpanded(idx))
 
     def on_double(self, idx):
         p = self.model.filePath(idx)

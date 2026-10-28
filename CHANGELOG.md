@@ -6,6 +6,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Polished the desktop file browser: themed flat folder/video icons, a clean
+  uniform row selection (no notch beside the expand arrow), roomier rows, hover
+  feedback, and larger icons. Folders now open/close on a single click.
+
 ## [0.3.0] - 2026-10-28
 
 ### Added
