@@ -3,7 +3,7 @@
 # vizgui: stable release, built from the tagged source tarball.
 # For the rolling build from the main branch see ../vizgui-git.
 pkgname=vizgui
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Cast local media to a SmartCast TV / Chromecast or VLC, with a remote, a phone web-remote, live transcoding, and SMB sources"
 arch=('any')
@@ -16,12 +16,12 @@ depends=(
     'vlc'          # VLC playback target
     'playerctl'    # MPRIS control of a hand-opened VLC
     'gvfs-smb'     # on-demand SMB mounts
-    'qrencode'     # phone-remote pairing QR (v0.1.0 uses the qrencode CLI)
+    'python-qrcode'  # phone-remote pairing QR
     'go-chromecast-git'  # casting; the only AUR dep (builds from Go source)
 )
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/jm12460/VizGui/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('536a8a1008f5cb0f0e897e425cd8a47d7a8f2cfc5c196c02fa643140f032a743')
+sha256sums=('c39a2d5b34f1cba437234b04373cce4c70bfa05f34482dd2fdec3be0a72843c3')
 
 build() {
     cd "$srcdir/VizGui-$pkgver"
