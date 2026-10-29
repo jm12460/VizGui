@@ -6,10 +6,42 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-29
+
+### Added
+- **Headless server mode** — run VizGui's playback engine without launching
+  the desktop GUI, including as a persistent systemd user service.
+- **Connected desktop mode** — the full desktop GUI can connect to an existing
+  VizGui server and control playback remotely.
+- **Server-backed media browsing** — navigate configured media sources through
+  the connected GUI, including nested folders, search, and Continue Watching.
+- **Startup mode selection** — when a server is detected, choose Connect to
+  Server, Run Standalone, or Quit.
+- Automated regression tests covering startup modes and safe handling of
+  invalid configuration in both desktop and headless-server startup.
+
 ### Changed
-- Polished the desktop file browser: themed flat folder/video icons, a clean
-  uniform row selection (no notch beside the expand arrow), roomier rows, hover
-  feedback, and larger icons. Folders now open/close on a single click.
+- **Playback architecture** — extracted a Qt-independent engine shared by
+  standalone desktop operation and headless server operation.
+- Polished the desktop file browser with themed folder/video icons, uniform
+  selection, roomier rows, hover feedback, and single-click folder expansion.
+- **Configuration loading** — existing configuration values and unknown fields
+  are preserved while missing supported defaults are filled in.
+
+### Fixed
+- **Configuration safety** — invalid JSON, unreadable configurations, and
+  invalid configuration structures now stop startup without replacing the
+  original configuration.
+- Desktop startup displays a configuration error dialog instead of silently
+  resetting settings.
+- Headless-server startup reports configuration errors clearly without a
+  Python traceback.
+
+### Compatibility
+- Standalone desktop mode remains supported; running a headless server is
+  optional.
+- Existing configurations do not require a manual migration for this release.
+- Multiple independent simultaneous playback sessions are not yet supported.
 
 ## [0.3.0] - 2026-10-28
 
@@ -103,7 +135,8 @@ First tagged release.
   are additive rather than rewrites.
 - Pure-logic test suite (85 tests, no GUI/network/hardware).
 
-[Unreleased]: https://github.com/jm12460/VizGui/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jm12460/VizGui/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jm12460/VizGui/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jm12460/VizGui/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jm12460/VizGui/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jm12460/VizGui/releases/tag/v0.1.0

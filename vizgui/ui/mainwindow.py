@@ -56,10 +56,14 @@ def qr_pixmap(data, box=8, border=3):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, remote_controller=None):
+    def __init__(self, remote_controller=None, playback_role="owner",
+                 observer_client=None):
         super().__init__()
         self.remote_controller = remote_controller
         self.connected_mode = remote_controller is not None
+        self.observer_controller = None
+        self._observer_snapshot = None
+        self._observer_online = False
         self.setWindowTitle("vizgui")
         self.resize(980, 640)
         # All playback control + state lives in the Qt-free Engine; this window is a
@@ -67,7 +71,7 @@ class MainWindow(QMainWindow):
         # on_change hook, so a headless server can reuse the same engine.
         self.engine = None if self.connected_mode else Engine(
             run_async=run_async, on_change=self._render,
-            on_status=self._status)
+            on_status=self._status, playback_role=playback_role)
 
         root = QWidget(); self.setCentralWidget(root)
         outer = QHBoxLayout(root)
@@ -265,6 +269,13 @@ class MainWindow(QMainWindow):
             self._health_check()
             self.engine.poll_tv()
             self.engine.poll_cast()
+            if observer_client is not None:
+                from ..remote_controller import RemoteController
+                self.observer_controller = RemoteController(observer_client, self)
+                self.observer_controller.status_changed.connect(self._observer_status)
+                self.observer_controller.connection_changed.connect(
+                    self._observer_connection_changed)
+                self.observer_controller.start()
         self.statusBar().showMessage("Ready", 3000)
 
     def _remote_connection_changed(self, connected):
@@ -837,6 +848,9 @@ class MainWindow(QMainWindow):
         if self.connected_mode:
             self._remote_continue()
             return
+        if self.engine._cast_observer():
+            self._status("Continue Watching changes are managed by the VizGui server")
+            return
         items = [it for it in history.recent() if it.get("path") != self.engine._now_path]
         dlg = QDialog(self); dlg.setWindowTitle("Continue watching"); dlg.resize(460, 420)
         lay = QVBoxLayout(dlg)
@@ -966,6 +980,8 @@ class MainWindow(QMainWindow):
         return self.engine.stop()
 
     def closeEvent(self, event):
+        if self.observer_controller is not None:
+            self.observer_controller.close()
         if self.connected_mode:
             self.remote_controller.close()
         else:
@@ -1045,9 +1061,71 @@ class MainWindow(QMainWindow):
         self.engine.web_do(kind, p)
 
     # ---- rendering: reflect the engine's state into the widgets ----
+    def _observer_status(self, status):
+        self._observer_snapshot = status
+        self._observer_online = True
+        if self.engine._cast_observer():
+            self._render()
+
+    def _observer_connection_changed(self, connected):
+        self._observer_online = connected
+        if not connected:
+            self._observer_snapshot = None
+        if self.engine._cast_observer():
+            self._render()
+
+    def _render_observer_now(self):
+        """Display server playback without changing local Engine ownership."""
+        if not self._observer_online or self._observer_snapshot is None:
+            self.np_title.setText(
+                "Server disconnected — Chromecast controls unavailable")
+            self.np_badge.hide()
+            self.np_bar.setRange(0, 1000)
+            self.np_bar.setValue(0)
+            self.np_time.setText("")
+            return
+
+        now = self._observer_snapshot.get("now") or {}
+        title = now.get("title") or "Nothing playing."
+        pos = int(now.get("pos") or 0)
+        dur = int(now.get("dur") or 0)
+        state = now.get("state") or ""
+        live = bool(now.get("live"))
+
+        self.np_title.setText(title)
+        self.np_badge.setVisible(live)
+
+        if live:
+            self.np_bar.setRange(0, 0)
+            self.np_time.setText(f"{fmt_time(pos)} · live")
+        elif dur > 0:
+            self.np_bar.setRange(0, dur)
+            self.np_bar.setValue(min(pos, dur))
+            tail = f" · {state.lower()}" if state and state != "PLAYING" else ""
+            self.np_time.setText(
+                f"{fmt_time(pos)} / {fmt_time(dur)}{tail}")
+        else:
+            self.np_bar.setRange(0, 1000)
+            self.np_bar.setValue(0)
+            self.np_time.setText(state.lower())
+
     def _render(self):
         """Called on every engine state change (poll result, tick, action)."""
         e = self.engine
+        if self.observer_controller is not None and e._cast_observer():
+            self._render_observer_now()
+            self.b_chapters.hide()
+            self.b_audio.hide()
+            self.b_subs.hide()
+            self.b_cast.setEnabled(False)
+            self._sync_target_box()
+            self.remote.set_target_label(
+                e.active_target_name() + " (server-owned)")
+            self.remote.set_tv_enabled(bool(config.HOST))
+            self.tv_status.setText(
+                (e._tv_text or "TV: …") if config.HOST
+                else "No SmartCast TV configured")
+            return
         if e._message:
             self.np_title.setText(e._message)
             self.np_badge.hide()

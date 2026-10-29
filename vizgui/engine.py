@@ -40,7 +40,11 @@ def run_sync(fn, on_done=None):
 
 
 class Engine:
-    def __init__(self, run_async=run_sync, on_change=None, on_status=None):
+    def __init__(self, run_async=run_sync, on_change=None, on_status=None,
+                 playback_role="owner"):
+        if playback_role not in ("owner", "observer"):
+            raise ValueError(f"Invalid playback role: {playback_role}")
+        self.playback_role = playback_role
         self._run = run_async
         self._on_change = on_change or (lambda: None)
         self._on_status = on_status or (lambda msg: None)
@@ -70,6 +74,16 @@ class Engine:
         self._tv_text = ""               # SmartCast status line for the pill
         self._message = None             # transient now-playing message (error/result)
         self._display_title = ""         # now-playing title while a file is playing
+
+    def _cast_observer(self):
+        """Never operate on a Cast receiver owned by another engine."""
+        return self.playback_role == "observer" and self.target == "cast"
+
+    def _observer_blocked(self):
+        if self._cast_observer():
+            self._status("Chromecast is managed by the VizGui server. Connect to control it.")
+            return True
+        return False
 
     # ---- view hooks ----
     def _changed(self):
@@ -114,6 +128,8 @@ class Engine:
     def remember(self):
         """Record where the current file stopped. For a live stream the reported
         pos is relative to the resume point, so add the base."""
+        if self._cast_observer():
+            return
         if self._now_path and (self._np_dur > 0 or self.now_live):
             base = self._resume_base if self.now_live else 0
             history.record(self._now_path, self._np_pos + base, self._np_dur,
@@ -123,6 +139,8 @@ class Engine:
     def recover_cast_item(self, st):
         """After an app restart, reconnect to the active Cast item. The
         direct-vs-transcode matching rules live in history.recover_match."""
+        if self._cast_observer():
+            return
         media_file = st.get("file", "")
         m = history.recover_match(media_file, history.current(), history.recent())
         if not m:
@@ -140,6 +158,8 @@ class Engine:
 
     # ---- casting ----
     def set_autonext(self, on):
+        if self._observer_blocked():
+            return
         self.auto_next = bool(on)
         config.CFG["auto_next"] = self.auto_next
         try:
@@ -149,6 +169,8 @@ class Engine:
         self._changed()
 
     def cast(self, path, resume=0, audio=None, sub=None):
+        if self._observer_blocked():
+            return
         self.remember()                  # save position of the file we're leaving
         self._now_path = path
         self._resume_base = resume
@@ -195,6 +217,8 @@ class Engine:
         self._changed()
 
     def select_sub(self, sub):
+        if self._observer_blocked():
+            return
         """Turn subtitles on/off by re-casting at the current position (keeps audio)."""
         if not self._now_path:
             return
@@ -206,6 +230,8 @@ class Engine:
         self.cast(self._now_path, pos, audio=self._audio, sub=sub)
 
     def select_audio(self, i):
+        if self._observer_blocked():
+            return
         """Switch audio track by re-casting the current file at its position."""
         if not self._now_path or i == self._audio:
             return
@@ -213,6 +239,8 @@ class Engine:
         self.cast(self._now_path, pos, audio=i, sub=self._sub)
 
     def jump_to(self, secs):
+        if self._observer_blocked():
+            return
         """Jump to an absolute time (chapter). A live stream can't seek, so restart
         it at the offset; direct cast and VLC seek in place."""
         secs = int(secs)
@@ -222,6 +250,8 @@ class Engine:
             self._run(lambda: self.active.seek_to(secs), lambda _: self.poll_cast())
 
     def go_next(self):
+        if self._observer_blocked():
+            return
         if self.active.native_skip():
             self._run(lambda: self.active.skip(1), lambda _: self.poll_cast())
         elif self._now_path:
@@ -230,6 +260,8 @@ class Engine:
                 self.cast(nxt)
 
     def go_prev(self):
+        if self._observer_blocked():
+            return
         if self.active.native_skip():
             self._run(lambda: self.active.skip(-1), lambda _: self.poll_cast())
         elif self._now_path:
@@ -239,15 +271,23 @@ class Engine:
 
     # ---- transport ----
     def rewind(self):
+        if self._observer_blocked():
+            return
         return self.active.seek(-30)
 
     def forward(self):
+        if self._observer_blocked():
+            return
         return self.active.seek(30)
 
     def playpause(self):
+        if self._observer_blocked():
+            return
         return self.active.pause()
 
     def stop(self):
+        if self._observer_blocked():
+            return
         self._user_stopped = True
         if self.target == "cast":
             history.clear_current()
@@ -257,6 +297,8 @@ class Engine:
         return self.active.stop()
 
     def transport(self, fn):
+        if self._observer_blocked():
+            return
         """Run a transport action off-thread, then poll to refresh state."""
         self._run(fn, lambda _: self.poll_cast())
 
@@ -278,6 +320,8 @@ class Engine:
             self._status("TV didn't respond — is it on and on the same Wi-Fi?")
 
     def on_ended(self, allow_auto_next=True, finished=True):
+        if self._cast_observer():
+            return
         """Current item finished. Auto-advance if the target needs us to, else clear."""
         old_path = self._now_path
         unknown_duration_live_end = finished and self.now_live and self._np_dur <= 0
@@ -318,6 +362,22 @@ class Engine:
 
     def _poll_done(self, st):
         if not isinstance(st, dict):
+            return
+        if self._cast_observer():
+            idle = bool(st.get("idle"))
+            self._now_path = None
+            self.now_title = None
+            self._recovered_cast_session = False
+            self._saw_playing = False
+            self._np_pos = st.get("pos", 0) if not idle else 0
+            self._np_dur = st.get("dur", 0) if not idle else 0
+            self._np_state = st.get("state", "") if not idle else ""
+            self._np_playing = not idle and self._np_state in ("PLAYING", "")
+            self.now_live = not idle and bool(st.get("live", False))
+            filename = st.get("file") or "Playing"
+            self._display_title = ("Nothing casting" if idle else
+                                   "Live cast" if filename == "pipe_output" else filename)
+            self._changed()
             return
         if st.get("idle"):
             # our process still starting, or mid-launch -> transient, keep state
@@ -456,6 +516,8 @@ class Engine:
         }
 
     def web_add_cast(self, dev):
+        if self.playback_role == "observer":
+            return
         """Add a Cast device discovered from the phone, then switch to it."""
         addr = dev.get("addr")
         if not addr:
@@ -476,6 +538,8 @@ class Engine:
         self._changed()                  # target list grew -> view rebuilds the picker
 
     def web_do(self, kind, p):
+        if self.playback_role == "observer" and kind in ("forget", "clear"):
+            return
         """Apply a phone action. In the GUI this is marshaled onto the main thread;
         headless it runs on the HTTP thread. Either way it only touches engine state."""
         try:

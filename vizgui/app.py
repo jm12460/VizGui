@@ -49,7 +49,7 @@ def main():
             controller = RemoteController(client)
             w = MainWindow(remote_controller=controller)
         elif selected is standalone_button:
-            w = MainWindow()
+            w = MainWindow(playback_role="observer", observer_client=client)
         else:
             return
     else:
