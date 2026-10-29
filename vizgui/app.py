@@ -1,13 +1,28 @@
 """Application entry point: build the QApplication and show the main window."""
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from . import config
-from .ui import QSS, MainWindow
-from .server_client import ServerClient
-
-
 def main():
     app = QApplication([])
+
+    try:
+        from . import config
+        from .ui import QSS, MainWindow
+        from .server_client import ServerClient
+    except RuntimeError as exc:
+        QMessageBox.critical(
+            None,
+            "VizGui Configuration Error",
+            chr(10).join([
+                "VizGui could not load its configuration.",
+                "",
+                str(exc),
+                "",
+                "Your existing configuration has not been replaced. "
+                "Check the file and its permissions before trying again.",
+            ]),
+        )
+        return 1
+
     app.setStyleSheet(QSS)
     client = ServerClient()
     connected = client.available()

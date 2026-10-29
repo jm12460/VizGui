@@ -55,41 +55,63 @@ FRESH_INSTALL = False
 
 
 def load_config():
+    """Load existing settings without silently replacing a damaged config."""
     global FRESH_INSTALL
     FRESH_INSTALL = False
+
     try:
         with open(CONFIG_PATH) as f:
             cfg = json.load(f)
-        cfg.setdefault("sources", [])
-        cfg.setdefault("targets", [])
-        cfg.setdefault("web", {"enabled": True, "port": 8950})
-        cfg.setdefault("auto_next", True)
-        if ensure_web_secrets(cfg):
-            try:
-                save_config(cfg)
-            except Exception:
-                pass
-        return cfg
-    except Exception as e:
-        # A present-but-unreadable config (corruption, bad manual edit) must NOT be
-        # silently overwritten — it holds SMB passwords and phone-remote pairings.
-        # Back it up and start fresh; only a genuinely missing file is "first run".
-        if os.path.isfile(CONFIG_PATH):
-            try:
-                os.replace(CONFIG_PATH, CONFIG_PATH + ".corrupt")
-                log.warning("config.json unreadable (%s); backed up to config.json.corrupt", e)
-            except OSError:
-                pass
-            FRESH_INSTALL = False
-        else:
-            FRESH_INSTALL = True
+    except FileNotFoundError:
+        # Only a genuinely absent configuration is a first run.
+        if os.path.lexists(CONFIG_PATH):
+            raise RuntimeError(
+                f"VizGui configuration cannot be opened: {CONFIG_PATH}"
+            )
         cfg = _migrate_default()
         ensure_web_secrets(cfg)
+        save_config(cfg)
+        FRESH_INSTALL = True
+        return cfg
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"VizGui configuration contains invalid JSON: {CONFIG_PATH}. "
+            "The original file has been left untouched."
+        ) from e
+    except OSError as e:
+        raise RuntimeError(
+            f"Cannot read VizGui configuration: {CONFIG_PATH}. "
+            "The original file has been left untouched."
+        ) from e
+
+    if not isinstance(cfg, dict):
+        raise RuntimeError(
+            f"VizGui configuration must be a JSON object: {CONFIG_PATH}. "
+            "The original file has been left untouched."
+        )
+
+    # Preserve existing values, including fields from older or newer versions.
+    cfg.setdefault("sources", [])
+    cfg.setdefault("targets", [])
+    cfg.setdefault("web", {"enabled": True, "port": 8950})
+    cfg.setdefault("auto_next", True)
+
+    if not isinstance(cfg["sources"], list):
+        raise RuntimeError("VizGui configuration 'sources' must be a list.")
+    if not isinstance(cfg["targets"], list):
+        raise RuntimeError("VizGui configuration 'targets' must be a list.")
+    if not isinstance(cfg["web"], dict):
+        raise RuntimeError("VizGui configuration 'web' must be an object.")
+
+    if ensure_web_secrets(cfg):
+        # Existing behavior: persist newly generated pairing credentials.
+        # If saving fails, do not prevent an otherwise valid config from loading.
         try:
             save_config(cfg)
-        except Exception:
-            pass
-        return cfg
+        except OSError as e:
+            log.warning("Could not persist web credentials: %s", e)
+
+    return cfg
 
 
 CFG = load_config()

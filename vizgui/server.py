@@ -13,7 +13,10 @@ import sys
 import threading
 import time
 
-from . import config
+try:
+    from . import config
+except RuntimeError as exc:
+    raise SystemExit(f"VizGui server cannot start: {exc}") from None
 from .engine import Engine
 from .net import local_ip
 from .paths import log

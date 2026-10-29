@@ -15,9 +15,13 @@ def _run_startup(monkeypatch, server_available, selected):
     client.available.return_value = server_available
 
     monkeypatch.setattr(app, "QApplication", lambda args: application)
-    monkeypatch.setattr(app, "ServerClient", lambda: client)
-    monkeypatch.setattr(app, "MainWindow", lambda **kwargs: window)
-    monkeypatch.setattr(app.config, "FRESH_INSTALL", False)
+    from vizgui import server_client
+    from vizgui import ui
+
+    monkeypatch.setattr(server_client, "ServerClient", lambda: client)
+    monkeypatch.setattr(ui, "MainWindow", lambda **kwargs: window)
+    from vizgui import config
+    monkeypatch.setattr(config, "FRESH_INSTALL", False)
 
     buttons = {}
 

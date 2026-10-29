@@ -90,18 +90,61 @@ def test_load_config_existing_file_not_fresh():
             assert config.FRESH_INSTALL is False   # existing config -> no wizard
 
 
-def test_load_config_corrupt_file_backed_up_not_wiped():
+def test_load_config_corrupt_file_is_never_replaced():
     with tempfile.TemporaryDirectory() as d:
         cfgpath = os.path.join(d, "config.json")
+        original = "{not valid json,,,"
         with open(cfgpath, "w") as f:
-            f.write("{not valid json,,,")     # corruption / bad manual edit
+            f.write(original)
+
+        with mock.patch.object(config, "CONFIG_DIR", d), \
+             mock.patch.object(config, "CONFIG_PATH", cfgpath):
+            import pytest
+            with pytest.raises(RuntimeError, match="invalid JSON"):
+                config.load_config()
+
+            with open(cfgpath) as f:
+                assert f.read() == original
+            assert config.FRESH_INSTALL is False
+
+
+def test_load_config_preserves_existing_and_unknown_fields():
+    with tempfile.TemporaryDirectory() as d:
+        cfgpath = os.path.join(d, "config.json")
+        original = {
+            "sources": [{"name": "NAS", "path": "/media/nas",
+                         "password": "example-secret"}],
+            "targets": [{"type": "cast", "name": "Living Room",
+                         "auth_token": "existing-token"}],
+            "web": {"enabled": False, "port": 8951,
+                    "token": "existing-web-token", "pin": "123456"},
+            "auto_next": False,
+            "future_setting": {"keep": True},
+        }
+        with open(cfgpath, "w") as f:
+            import json
+            json.dump(original, f)
+
         with mock.patch.object(config, "CONFIG_DIR", d), \
              mock.patch.object(config, "CONFIG_PATH", cfgpath):
             loaded = config.load_config()
-            # the unreadable config is preserved, not silently overwritten...
-            assert os.path.isfile(cfgpath + ".corrupt")
-            with open(cfgpath + ".corrupt") as f:
-                assert f.read() == "{not valid json,,,"
-            # ...and it's NOT treated as a first run (would re-open the wizard)
+            assert loaded == original
+            with open(cfgpath) as f:
+                assert json.load(f) == original
             assert config.FRESH_INSTALL is False
-    assert any(t["type"] == "vlc" for t in loaded["targets"])   # usable defaults
+
+
+def test_load_config_rejects_invalid_structure_without_overwriting():
+    with tempfile.TemporaryDirectory() as d:
+        cfgpath = os.path.join(d, "config.json")
+        with open(cfgpath, "w") as f:
+            f.write('{"sources": "not a list", "targets": []}')
+
+        with mock.patch.object(config, "CONFIG_DIR", d), \
+             mock.patch.object(config, "CONFIG_PATH", cfgpath):
+            import pytest
+            with pytest.raises(RuntimeError, match="sources"):
+                config.load_config()
+
+        with open(cfgpath) as f:
+            assert f.read() == '{"sources": "not a list", "targets": []}'
