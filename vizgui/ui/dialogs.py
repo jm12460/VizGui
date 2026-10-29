@@ -3,7 +3,7 @@ import os
 
 from PySide6.QtWidgets import (QDialog, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
                                QLineEdit, QCheckBox, QFormLayout, QListWidget, QFileDialog,
-                               QMessageBox, QInputDialog, QDialogButtonBox, QTabWidget, QWidget)
+                               QMessageBox, QInputDialog, QDialogButtonBox, QTabWidget, QWidget, QComboBox)
 
 from .. import config
 from ..config import save_config
@@ -14,6 +14,7 @@ from ..smartcast import sc_pair_start, sc_pair_finish
 from ..net import local_ip, lan_cidr
 from ..qtasync import run_async
 from .. import platforms
+from ..appearance import load as load_appearance, save as save_appearance
 
 
 class SmbDialog(QDialog):
@@ -60,17 +61,37 @@ class SmbDialog(QDialog):
 
 class SetupDialog(QDialog):
     """Configure media sources and cast/playback targets, saved to config.json."""
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, appearance_only=False):
         super().__init__(parent)
+        self.appearance_only = appearance_only
         self.win = parent
+        if appearance_only:
+            self.setWindowTitle("viz-gui Appearance")
         self.setWindowTitle("viz-gui Setup")
         self.resize(560, 470)
         self.sources = [dict(s) for s in config.CFG.get("sources", [])]
         self.targets = [dict(t) for t in config.CFG.get("targets", [])]
         self.web = dict(config.CFG.get("web", {"enabled": True, "port": 8950}))
         root = QVBoxLayout(self)
+        if self.appearance_only:
+            self.setSizeGripEnabled(False)
+            # Leave room around the bottom-right XWayland window corner.
+            root.setContentsMargins(12, 12, 30, 16)
         tabs = QTabWidget(); root.addWidget(tabs, 1)
 
+        if not self.appearance_only:
+            self._add_media_tabs(tabs)
+        self._add_appearance_tab(tabs)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self._save); bb.rejected.connect(self.reject)
+        root.addWidget(bb)
+        if not self.appearance_only:
+            self._refresh()
+            self._autoscan()
+
+    def _add_media_tabs(self, tabs):
+        """Build full Setup controls, never appearance-only controls."""
         # ---- Sources tab ----
         srcw = QWidget(); sv = QVBoxLayout(srcw)
         sv.addWidget(QLabel("Media sources (folders / NAS mounts)"))
@@ -140,11 +161,80 @@ class SetupDialog(QDialog):
         wv.addStretch(1)
         tabs.addTab(webw, "Phone Remote")
 
-        bb = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        bb.accepted.connect(self._save); bb.rejected.connect(self.reject)
-        root.addWidget(bb)
-        self._refresh()
-        self._autoscan()   # look for the TV in the background so the user needn't type an IP
+
+    def _add_appearance_tab(self, tabs):
+        """Build desktop-only appearance controls."""
+        # ---- Appearance tab: desktop-only preferences ----
+        appearance_widget = QWidget()
+        appearance_form = QFormLayout(appearance_widget)
+
+        scale, backend = load_appearance()
+        self._initial_appearance = (scale, backend)
+
+        self.appearance_scale = QComboBox()
+        for label, value in (
+            ("System default", "system"),
+            ("100% — Normal", "1"),
+            ("125% — Comfortable", "1.25"),
+            ("150% — Large", "1.5"),
+            ("175% — Extra large", "1.75"),
+            ("200% — Maximum", "2"),
+        ):
+            self.appearance_scale.addItem(label, value)
+        self.appearance_scale.setCurrentIndex(
+            self.appearance_scale.findData(scale)
+        )
+
+        self.appearance_backend = QComboBox()
+        for label, value in (
+            ("Automatic", "auto"),
+            ("Native Wayland", "wayland"),
+            ("X11 / XWayland — compatibility", "xcb"),
+        ):
+            self.appearance_backend.addItem(label, value)
+        self.appearance_backend.setCurrentIndex(
+            self.appearance_backend.findData(backend)
+        )
+
+        appearance_form.addRow("Interface size:", self.appearance_scale)
+        appearance_form.addRow("Display backend:", self.appearance_backend)
+
+        note = QLabel(
+            "Changes take effect the next time you open the desktop GUI. "
+            "On some Wayland systems, scaled popup menus may be misplaced. "
+            "Try X11 / XWayland if that happens. "
+            "Your headless server does not need to restart."
+        )
+        note.setWordWrap(True)
+        appearance_form.addRow(note)
+
+        self.appearance_restart_warning = QLabel(
+            "⚠  Restart required — save your changes, then close and "
+            "reopen the desktop GUI. Your headless server can stay running."
+        )
+        self.appearance_restart_warning.setWordWrap(True)
+        self.appearance_restart_warning.setStyleSheet(
+            "color: #e8bd65; font-weight: 600;"
+        )
+        appearance_form.addRow(self.appearance_restart_warning)
+
+        self.appearance_scale.currentIndexChanged.connect(
+            self._update_appearance_restart_warning
+        )
+        self.appearance_backend.currentIndexChanged.connect(
+            self._update_appearance_restart_warning
+        )
+        self._update_appearance_restart_warning()
+
+        tabs.addTab(appearance_widget, "Appearance")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+
+        # Some Qt styles enable a resize grip when the dialog is shown.
+        # The appearance-only window doesn't need this corner widget.
+        if self.appearance_only:
+            self.setSizeGripEnabled(False)
 
     def _upd_web(self):
         port = (self.web_port.text().strip() or "8950")
@@ -313,6 +403,10 @@ class SetupDialog(QDialog):
             del self.targets[i]; self._refresh()
 
     def _save(self):
+        if self.appearance_only:
+            self._save_appearance()
+            return
+
         try:
             port = int(self.web_port.text())
         except ValueError:
@@ -329,4 +423,29 @@ class SetupDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, "Save", "Could not save config:\n" + str(e))
             return
+        self._save_appearance()
+
+    def _update_appearance_restart_warning(self, *_):
+        current = (
+            self.appearance_scale.currentData(),
+            self.appearance_backend.currentData(),
+        )
+        self.appearance_restart_warning.setVisible(
+            current != self._initial_appearance
+        )
+
+    def _save_appearance(self):
+        new_appearance = (
+            self.appearance_scale.currentData(),
+            self.appearance_backend.currentData(),
+        )
+        try:
+            save_appearance(*new_appearance)
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Appearance",
+                "Could not save appearance settings:\n" + str(e)
+            )
+            return
+
         self.accept()

@@ -1,8 +1,20 @@
 """Application entry point: build the QApplication and show the main window."""
+from pathlib import Path
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+
 def main():
+    from .appearance import apply_startup
+    apply_startup()
+
     app = QApplication([])
+
+    # Identity shared by KDE taskbar, desktop launcher, and Qt windows.
+    app.setApplicationName("vizgui")
+    app.setApplicationDisplayName("VizGui")
+    app.setDesktopFileName("vizgui")
+    app.setWindowIcon(QIcon(str(Path(__file__).with_name("icon.png"))))
 
     try:
         from . import config

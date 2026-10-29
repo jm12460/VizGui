@@ -43,6 +43,8 @@ package() {
     python -m installer --destdir="$pkgdir" dist/*.whl
 
     install -Dm644 packaging/vizgui.desktop "$pkgdir/usr/share/applications/vizgui.desktop"
-    install -Dm644 packaging/vizgui.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/vizgui.svg"
+    install -Dm644 packaging/vizgui-64.png "$pkgdir/usr/share/icons/hicolor/64x64/apps/vizgui.png"
+    install -Dm644 packaging/vizgui-256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/vizgui.png"
+    install -Dm644 vizgui/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/vizgui.png"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

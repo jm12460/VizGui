@@ -65,6 +65,16 @@ The headless server currently supports one playback-owning session.
   your TV, seeds your media folders on first run, and shows the firewall command
   matching your firewall — no config files to edit by hand.
 
+## Appearance and accessibility
+
+Use **Setup → Appearance**, or **Appearance** when connected to a server,
+to choose system-default scaling or 100%, 125%, 150%, 175%, or 200%.
+The display backend can be Automatic, Wayland, or X11/XWayland.
+
+An inline warning identifies settings requiring a restart of the desktop GUI.
+The headless server can continue running. If scaled dropdowns appear
+misplaced under Wayland, try the X11/XWayland compatibility backend.
+
 ## Install (Linux)
 
 Works on **Arch, Debian/Ubuntu, and Fedora** — the installer detects

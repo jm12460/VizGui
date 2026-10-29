@@ -252,7 +252,7 @@ class MainWindow(QMainWindow):
             self._remote_sources = []
             self.browse_stack.setCurrentWidget(self.remote_tree)
             self.b_continue.setEnabled(True)
-            self.b_setup.setEnabled(False)
+            self.b_setup.setText("⚙ Appearance")
             self.web_label.setText("Browsing media on the connected server")
             self.remote_controller.start()
         else:
@@ -836,6 +836,24 @@ class MainWindow(QMainWindow):
         self._render()   # remote gating + TV pill are part of the full render
 
     def open_setup(self):
+        if self.connected_mode:
+            # Appearance is local to this desktop, so it needn't block
+            # the connected main window or start a nested event loop.
+            dlg = getattr(self, "_appearance_dialog", None)
+            if dlg is not None and dlg.isVisible():
+                dlg.raise_()
+                dlg.activateWindow()
+                return
+
+            dlg = SetupDialog(self, appearance_only=True)
+            dlg.setModal(False)
+            self._appearance_dialog = dlg
+            dlg.finished.connect(
+                lambda _result: setattr(self, "_appearance_dialog", None)
+            )
+            dlg.show()
+            return
+
         dlg = SetupDialog(self)
         if dlg.exec():
             config.CFG = load_config()

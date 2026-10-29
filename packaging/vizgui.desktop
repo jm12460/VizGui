@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=vizgui
+Name=VizGui
 GenericName=Media Caster
 Comment=Cast local media to a TV / Chromecast or VLC
 Exec=viz-gui
@@ -9,3 +9,4 @@ Terminal=false
 Categories=AudioVideo;Player;Video;
 Keywords=cast;chromecast;smartcast;vlc;tv;media;
 StartupNotify=true
+StartupWMClass=vizgui

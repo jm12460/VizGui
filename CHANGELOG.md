@@ -6,6 +6,29 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-29
+
+### Added
+- **Desktop appearance preferences** — persistent interface scaling from
+  100–200% or system default, with automatic, Wayland, and XWayland backends.
+- **Connected-mode Appearance settings** — change local GUI preferences
+  without modifying server-owned media settings.
+- **Application icon** — new TV/play/casting artwork for Qt windows,
+  application menus, and Linux desktop launchers.
+- Appearance and dialog regression tests.
+
+### Fixed
+- Saved XWayland preferences now take precedence over inherited Qt platform
+  lists such as `wayland;xcb`.
+- Replaced the modal restart notification with an inline warning.
+- Made connected-mode Appearance non-modal to avoid cursor trapping.
+- Removed the unwanted Qt resize grip from the Appearance dialog.
+
+### Compatibility
+- On some Qt/Wayland setups, application scaling can misplace dropdown
+  menus. XWayland is available as a compatibility option.
+- Headless server and playback behavior remain unchanged.
+
 ## [0.4.0] - 2026-10-29
 
 ### Added
@@ -138,7 +161,8 @@ First tagged release.
   are additive rather than rewrites.
 - Pure-logic test suite (85 tests, no GUI/network/hardware).
 
-[Unreleased]: https://github.com/jm12460/VizGui/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jm12460/VizGui/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/jm12460/VizGui/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/jm12460/VizGui/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jm12460/VizGui/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jm12460/VizGui/releases/tag/v0.2.0

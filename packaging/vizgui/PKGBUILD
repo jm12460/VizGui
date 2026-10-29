@@ -3,7 +3,7 @@
 # vizgui: stable release, built from the tagged source tarball.
 # For the rolling build from the main branch see ../vizgui-git.
 pkgname=vizgui
-pkgver=0.3.0
+pkgver=0.4.1
 pkgrel=1
 pkgdesc="Cast local media to a SmartCast TV / Chromecast or VLC, with a remote, a phone web-remote, live transcoding, and SMB sources"
 arch=('any')
@@ -21,7 +21,7 @@ depends=(
 )
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/jm12460/VizGui/archive/refs/tags/v$pkgver.tar.gz")
-# Regenerate after the v0.3.0 tag exists: `updpkgsums` (or makepkg -g).
+# Before AUR publication, pin the tagged archive checksum with `updpkgsums`.
 sha256sums=('SKIP')
 
 build() {
@@ -34,6 +34,8 @@ package() {
     python -m installer --destdir="$pkgdir" dist/*.whl
 
     install -Dm644 packaging/vizgui.desktop "$pkgdir/usr/share/applications/vizgui.desktop"
-    install -Dm644 packaging/vizgui.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/vizgui.svg"
+    install -Dm644 packaging/vizgui-64.png "$pkgdir/usr/share/icons/hicolor/64x64/apps/vizgui.png"
+    install -Dm644 packaging/vizgui-256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/vizgui.png"
+    install -Dm644 vizgui/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/vizgui.png"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

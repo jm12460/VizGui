@@ -4,9 +4,10 @@ Where vizgui is headed: from a working single-user Linux app to something
 **anyone can download and use, cross-platform, with ease-of-use and
 functionality out of the box.**
 
-Current status: **v0.3.0** · Linux (daily-driven); Windows/macOS backends
-written but untested on hardware · 151 passing tests · installs via `install.sh`
-(pacman/apt/dnf) or pip; stable + `-git` PKGBUILDs ready (AUR publish pending).
+Current status: **v0.4.1** · Linux daily-driven, with an optional headless
+server, connected GUI, and desktop appearance scaling · 226 passing tests.
+Windows/macOS backends are still untested on hardware. `install.sh` supports
+pacman/apt/dnf; AUR recipes are ready, but publication remains blocked.
 
 Phases ship in order; each one is usable on its own. Linux first (that's what
 works today), then Windows and macOS.
@@ -24,14 +25,15 @@ noting because they make the cross-platform work *additive* instead of a rewrite
 - [x] **Playback-engine extraction** (`vizgui/playback/` — `PlaybackTarget`
       contract + `CastTarget`/`VlcTarget` adapters); a new target (e.g. DLNA) is
       a self-contained file
-- [x] Test suite (151 tests, pure-logic, no GUI/network/hardware)
+- [x] Automated test suite (226 tests, including offscreen Qt checks;
+      real hardware testing is still needed)
 - [x] Reliability pass (status bar, startup health check, graceful
       tool-missing handling)
 - [x] MIT licensed, generic branding, public repo
 
 ---
 
-## Shipped since v0.1.0 (v0.2.0 – v0.3.0)
+## Shipped since v0.1.0 (v0.2.0 – v0.4.1)
 
 Feature and hardening work beyond the original roadmap — captured here so the
 plan reflects reality:
@@ -50,6 +52,11 @@ plan reflects reality:
       web-cast paths confined to source roots; corrupted config backed up, not
       wiped; VLC launch/reuse reliability; VLC Continue-watching tracks the real
       file after a native skip.
+
+- [x] **Headless server + connected GUI (v0.4.0)** — shared playback engine,
+      server-owned playback, and safe standalone observer mode.
+- [x] **Appearance and desktop integration (v0.4.1)** — persistent scaling,
+      XWayland compatibility, and a proper application icon.
 
 ---
 

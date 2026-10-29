@@ -45,7 +45,7 @@ include = ["vizgui*"]
 # remote.html is read from beside webremote.py at runtime, so it must ship
 # inside the installed package.
 [tool.setuptools.package-data]
-vizgui = ["*.html"]
+vizgui = ["*.html", "*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

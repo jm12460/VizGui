@@ -86,12 +86,21 @@ mkdir -p "$APPS"
 cat > "$APPS/vizgui.desktop" <<DESK
 [Desktop Entry]
 Type=Application
-Name=vizgui
+Name=VizGui
 Comment=Cast local media to a TV / Chromecast or VLC
 Exec=$BIN/viz-gui
+Icon=vizgui
 Terminal=false
 Categories=AudioVideo;Player;
+StartupNotify=true
+StartupWMClass=vizgui
 DESK
+say "Installing application icons..."
+ICONS="$HOME/.local/share/icons/hicolor"
+install -Dm644 "$DEST/packaging/vizgui-64.png" "$ICONS/64x64/apps/vizgui.png"
+install -Dm644 "$DEST/packaging/vizgui-256.png" "$ICONS/256x256/apps/vizgui.png"
+install -Dm644 "$DEST/vizgui/icon.png" "$ICONS/512x512/apps/vizgui.png"
+
 update-desktop-database "$APPS" 2>/dev/null || true
 
 case ":$PATH:" in
