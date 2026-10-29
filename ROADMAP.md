@@ -60,6 +60,28 @@ plan reflects reality:
 
 ---
 
+## Next milestone — v0.5.0 (proposed)
+
+Focus on reliability and playback ownership before expanding the feature set.
+
+- [ ] **Server disconnect recovery:** handle temporary network failures,
+      server restarts, and reconnection without interrupting active playback.
+- [ ] **Multiple connected clients:** verify that two desktop clients and the
+      phone remote can observe and control one server-owned playback session
+      without conflicting state.
+- [ ] **Playback ownership boundaries:** audit Cast/VLC ownership and prevent
+      standalone or disconnected clients from taking over server playback.
+- [ ] **Integration and regression tests:** test client lifecycle, shutdown,
+      reconnects, and failure paths beyond the existing unit coverage.
+- [ ] **KDE/Hyprland validation:** verify application identity, launcher icons,
+      and appearance preferences across real desktop environments.
+
+This is a proposed scope, not a committed release date. One shared server-owned
+playback session remains the model; independent simultaneous servers are not
+part of this milestone.
+
+---
+
 ## Phase 1 — Linux, properly installable (AUR)
 
 Turn "clone + shim + curl a binary" into a real, managed package.
@@ -67,13 +89,12 @@ Turn "clone + shim + curl a binary" into a real, managed package.
 - [x] Add **`pyproject.toml`** so vizgui is a proper installable package
       (entry point, package data for `remote.html`). *Load-bearing: this
       unblocks AUR, Flatpak, and PyInstaller later.*
-- [x] Write a **PKGBUILD** (`packaging/`) with real dependencies:
-      `python pyside6 ffmpeg vlc playerctl gvfs-smb qrencode` +
-      `go-chromecast-git` (the one AUR dep — builds from Go source; there's no
-      stable/binary go-chromecast package, but depending on it still drops the
-      curl-a-binary step). First package is `vizgui-git` (builds from main);
-      a stable `vizgui` follows once releases exist.
-- [x] Ship `.desktop` entry + SVG icon via the package (`packaging/`).
+- [x] Write **stable and rolling PKGBUILDs** (`packaging/`) with dependencies:
+      `python pyside6 python-qrcode ffmpeg vlc playerctl gvfs-smb` and
+      `go-chromecast-git` (the AUR dependency that builds from Go source).
+      Both `vizgui` and `vizgui-git` recipes are prepared; publication is pending.
+- [x] Ship a `.desktop` entry and PNG application icons (64/256/512 px),
+      including Qt window-icon integration and Linux installer support.
 - [ ] **Test in a clean Arch container/VM** with nothing pre-installed — the
       whole point is proving zero-setup install (`makepkg` + install).
       *(Next unchecked gate for Phase 1; homelab VMs available.)*
@@ -92,10 +113,12 @@ makes manual testing untenable.
 - [x] A **release process**: push a `v*` tag → `release.yml` builds sdist/wheel
       and cuts a GitHub release (AUR & Flatpak can reference these tags).
 - [x] **`CHANGELOG.md`** (keep-a-changelog style).
-- [x] Cut tags **`v0.1.0`**, **`v0.2.0`**, **`v0.3.0`** (release workflow builds
-      sdist/wheel + the GitHub release on each `v*` tag).
-- [x] Add a stable `vizgui` PKGBUILD built from the v0.1.0 release tarball
-      (`packaging/vizgui/`), alongside `vizgui-git` (`packaging/vizgui-git/`).
+- [x] Cut tags **`v0.1.0`**, **`v0.2.0`**, **`v0.3.0`**,
+      **`v0.4.0`**, and **`v0.4.1`**. The release workflow builds
+      sdist/wheel artifacts and creates GitHub Releases from version tags.
+- [x] Add a stable `vizgui` PKGBUILD targeting v0.4.1
+      (`packaging/vizgui/`), alongside the rolling `vizgui-git`
+      (`packaging/vizgui-git/`).
 
 **Risk:** low.
 
