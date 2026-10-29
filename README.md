@@ -5,7 +5,8 @@
 Cast local media to a SmartCast TV / Chromecast, or play it in VLC — with an
 on-screen remote, a phone web-remote, continue-watching, subtitle / audio-track /
 chapter selection, SMB network sources, and a first-run setup wizard. No account,
-no subscription. A single-user desktop app (PySide6/Qt).
+no subscription. Use it as a standalone PySide6 desktop app or connect to an
+optional persistent headless casting server.
 
 ![vizgui desktop app — media browser, now-playing, and SmartCast remote](docs/screenshots/desktop.png)
 
@@ -14,6 +15,30 @@ no subscription. A single-user desktop app (PySide6/Qt).
   &nbsp;
   <img src="docs/screenshots/phone-browse.png" width="31%" alt="Phone remote — browse and search your media">
 </p>
+
+
+## Headless server
+
+VizGui can run without a desktop window:
+
+    python -m vizgui.server
+
+Configure a Chromecast target and enable the phone remote in the desktop
+setup wizard first.
+
+For persistent playback on Linux, a sample systemd user service is provided
+at `packaging/vizgui-server.service`. Check its Python executable path before
+installing and enabling it.
+
+When a server is detected, the desktop offers:
+
+- **Connect to Server:** Browse media and control server-owned playback.
+- **Run Standalone:** Use local playback independently. Chromecast playback
+  owned by the server is visible but read-only; local VLC remains independent.
+- **Quit:** Exit without opening the desktop.
+
+The headless server currently supports one playback-owning session.
+
 
 ## Features
 - **Two playback targets:** cast to a Chromecast / SmartCast TV, or play on this

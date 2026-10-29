@@ -9,6 +9,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.4.0] - 2026-10-29
 
 ### Added
+- **Safe standalone observer mode** — displays server-owned Chromecast
+  playback without taking ownership or interrupting playback when closing.
+- Regression tests for observer-mode playback ownership and shutdown safety.
 - **Headless server mode** — run VizGui's playback engine without launching
   the desktop GUI, including as a persistent systemd user service.
 - **Connected desktop mode** — the full desktop GUI can connect to an existing
