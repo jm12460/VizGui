@@ -28,8 +28,9 @@ def main():
         if choice.clickedButton() is not connect_button:
             return
 
-        from .ui.connected import ConnectedWindow
-        w = ConnectedWindow(client)
+        from .remote_controller import RemoteController
+        controller = RemoteController(client)
+        w = MainWindow(remote_controller=controller)
     else:
         w = MainWindow()
 

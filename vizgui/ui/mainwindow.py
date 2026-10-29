@@ -55,15 +55,18 @@ def qr_pixmap(data, box=8, border=3):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, remote_controller=None):
         super().__init__()
+        self.remote_controller = remote_controller
+        self.connected_mode = remote_controller is not None
         self.setWindowTitle("vizgui")
         self.resize(980, 640)
         # All playback control + state lives in the Qt-free Engine; this window is a
         # view that drives it (timers, button clicks) and renders its state via the
         # on_change hook, so a headless server can reuse the same engine.
-        self.engine = Engine(run_async=run_async, on_change=self._render,
-                             on_status=self._status)
+        self.engine = None if self.connected_mode else Engine(
+            run_async=run_async, on_change=self._render,
+            on_status=self._status)
 
         root = QWidget(); self.setCentralWidget(root)
         outer = QHBoxLayout(root)
@@ -147,16 +150,19 @@ class MainWindow(QMainWindow):
         self.browse_stack.addWidget(self.tree)        # index 0: folder tree
         self.browse_stack.addWidget(self.results)     # index 1: search results
         bl.addWidget(self.browse_stack)
-        self._source_changed(self.source_box.currentIndex())  # root at first source
+        if not self.connected_mode:
+            self._source_changed(self.source_box.currentIndex())
         row = QHBoxLayout()
         self.b_cast = QPushButton("Cast selected"); self.b_cast.setProperty("class", "accent")
         self.b_cast.clicked.connect(self.cast_selected)
         self.target_box = QComboBox()
-        self._reload_targets()
+        if not self.connected_mode:
+            self._reload_targets()
         # Point the engine at the configured selection (so a VLC-only setup doesn't
         # leave 'cast' active and poll go-chromecast with no device), then mirror it.
-        self.engine.init_target()
-        self.target_box.setCurrentIndex(self.engine.target_index)
+        if not self.connected_mode:
+            self.engine.init_target()
+            self.target_box.setCurrentIndex(self.engine.target_index)
         self.target_box.currentIndexChanged.connect(self._target_changed)
         row.addWidget(self.b_cast)
         row.addWidget(QLabel("→"))
@@ -177,7 +183,8 @@ class MainWindow(QMainWindow):
         self.b_chapters = QPushButton("Chapters ▾"); self.b_chapters.hide()
         self.b_chapters.clicked.connect(self._chapters_menu)
         self.autonext_cb = QCheckBox("Auto-play next")
-        self.autonext_cb.setChecked(self.engine.auto_next)
+        self.autonext_cb.setChecked(
+            False if self.connected_mode else self.engine.auto_next)
         self.autonext_cb.toggled.connect(self._set_autonext)
         nhdr.addWidget(nt); nhdr.addStretch(1); nhdr.addWidget(self.np_badge)
         nhdr.addWidget(self.b_subs)
@@ -211,24 +218,385 @@ class MainWindow(QMainWindow):
         self.web_bridge.do.connect(self._on_web_do)   # marshals the action to the GUI thread
         self.httpd = None
         web = config.CFG.get("web", {})
-        if web.get("enabled", True):
+        if not self.connected_mode and web.get("enabled", True):
             try:
                 self.httpd = start_web_server(self, int(web.get("port", 8950)))
                 self._update_web_label()
             except Exception as e:
                 self.web_label.setText(f"phone remote off ({e})")
 
-        # ---- pollers (drive the engine) ----
-        self._tv_timer = QTimer(self); self._tv_timer.timeout.connect(self.engine.poll_tv)
-        self._tv_timer.start(5000)
-        self._cast_timer = QTimer(self); self._cast_timer.timeout.connect(self.engine.poll_cast)
-        self._cast_timer.start(3000)
-        self._np_timer = QTimer(self); self._np_timer.timeout.connect(self.engine.tick)
-        self._np_timer.start(1000)   # smooth 1s clock between the 3s status polls
-        self._render()               # paint the engine's initial state
+        # ---- playback updates ----
+        if self.connected_mode:
+            self.setWindowTitle("vizgui — Connected")
+            self.remote_controller.status_changed.connect(
+                self._render_remote)
+            self.remote_controller.connection_changed.connect(
+                self._remote_connection_changed)
+            self.remote_controller.error.connect(self._status)
+
+            # Local filesystem paths are not necessarily server paths.
+            # Remote browsing will replace these controls in the next step.
+            self._remote_sub = ""
+            self._remote_browse_seq = 0
+            self._remote_entries = []
+            self._remote_sources = []
+            self.browse_stack.setCurrentWidget(self.results)
+            self.b_continue.setEnabled(True)
+            self.b_setup.setEnabled(False)
+            self.web_label.setText("Browsing media on the connected server")
+            self.remote_controller.start()
+        else:
+            self._tv_timer = QTimer(self)
+            self._tv_timer.timeout.connect(self.engine.poll_tv)
+            self._tv_timer.start(5000)
+            self._cast_timer = QTimer(self)
+            self._cast_timer.timeout.connect(self.engine.poll_cast)
+            self._cast_timer.start(3000)
+            self._np_timer = QTimer(self)
+            self._np_timer.timeout.connect(self.engine.tick)
+            self._np_timer.start(1000)
+            self._render()
+            self._health_check()
+            self.engine.poll_tv()
+            self.engine.poll_cast()
         self.statusBar().showMessage("Ready", 3000)
-        self._health_check()
-        self.engine.poll_tv(); self.engine.poll_cast()
+
+    def _remote_connection_changed(self, connected):
+        if connected:
+            self._status("Connected to VizGui server")
+        else:
+            self._status("Server connection lost")
+            self.remote.set_tv_enabled(False)
+
+    def _render_remote(self, status):
+        """Render server state using the original MainWindow widgets."""
+        now = status.get("now") or {}
+        title = now.get("title") or ""
+        pos = int(now.get("pos") or 0)
+        dur = int(now.get("dur") or 0)
+        state = now.get("state") or ""
+        live = bool(now.get("live"))
+
+        self.np_title.setText(title or "Nothing playing.")
+        self.np_badge.setVisible(live)
+
+        if live:
+            self.np_bar.setRange(0, 0)
+            self.np_time.setText(f"{fmt_time(pos)} · live")
+        elif dur > 0:
+            self.np_bar.setRange(0, dur)
+            self.np_bar.setValue(min(pos, dur))
+            tail = f" · {state.lower()}" if state and state != "PLAYING" else ""
+            self.np_time.setText(
+                f"{fmt_time(pos)} / {fmt_time(dur)}{tail}")
+        else:
+            self.np_bar.setRange(0, 1000)
+            self.np_bar.setValue(0)
+            self.np_time.setText(state.lower())
+
+        sources = status.get("sources") or []
+        if sources != self._remote_sources:
+            self._remote_sources = sources
+            self.source_box.blockSignals(True)
+            self.source_box.clear()
+            for source in sources:
+                self.source_box.addItem(
+                    source.get("name", "?"), source)
+            self.source_box.blockSignals(False)
+            if sources:
+                self._remote_browse("")
+
+        targets = status.get("targets") or []
+        names = [t.get("name", "?") for t in targets]
+        current_names = [
+            self.target_box.itemText(i)
+            for i in range(self.target_box.count())
+        ]
+        if names != current_names:
+            self.target_box.blockSignals(True)
+            self.target_box.clear()
+            for t in targets:
+                self.target_box.addItem(t.get("name", "?"), t)
+            self.target_box.blockSignals(False)
+
+        index = int(status.get("target_index", -1))
+        if self.target_box.currentIndex() != index:
+            self.target_box.blockSignals(True)
+            self.target_box.setCurrentIndex(index)
+            self.target_box.blockSignals(False)
+
+        name = names[index] if 0 <= index < len(names) else "No target"
+        self.remote.set_target_label(name)
+
+        checked = bool(status.get("auto_next"))
+        if self.autonext_cb.isChecked() != checked:
+            self.autonext_cb.blockSignals(True)
+            self.autonext_cb.setChecked(checked)
+            self.autonext_cb.blockSignals(False)
+
+        self.tv_status.setText(status.get("tv") or "TV status unavailable")
+        self.remote.set_tv_enabled(bool(status.get("tv")))
+
+        audio = (status.get("audio") or {}).get("tracks") or []
+        subs = (status.get("subs") or {}).get("tracks") or []
+        chapters = status.get("chapters") or []
+        self.b_audio.setVisible(len(audio) > 1)
+        self.b_subs.setVisible(bool(subs))
+        self.b_chapters.setVisible(bool(chapters))
+
+    # ---- connected-mode playback history and track selection ----
+    def _remote_play(self, path):
+        """Offer the server's saved position before casting a remote file."""
+        def done(result):
+            if not isinstance(result, dict) or not result.get("ok"):
+                self._status("Could not load server history")
+                return
+
+            resume = next(
+                (int(item.get("pos", 0))
+                 for item in result.get("items", [])
+                 if item.get("path") == path),
+                0,
+            )
+
+            if resume > 0:
+                box = QMessageBox(self)
+                box.setWindowTitle("Resume")
+                box.setText(
+                    f"Resume “{os.path.basename(path)}” "
+                    f"from {fmt_time(resume)}?")
+                button = box.addButton(
+                    "Resume", QMessageBox.AcceptRole)
+                box.addButton(
+                    "Start over", QMessageBox.RejectRole)
+                box.exec()
+                if box.clickedButton() is not button:
+                    resume = 0
+
+            self.remote_controller.cast(path, resume)
+
+        run_async(self.remote_controller.client.history, done)
+
+    def _remote_continue(self):
+        """Show Continue Watching from the server's playback history."""
+        def done(result):
+            if not isinstance(result, dict) or not result.get("ok"):
+                self._status("Could not load server history")
+                return
+
+            items = result.get("items", [])
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Continue watching — Server")
+            dlg.resize(480, 420)
+            layout = QVBoxLayout(dlg)
+            lst = QListWidget()
+
+            for entry in items:
+                pos = int(entry.get("pos", 0))
+                dur = int(entry.get("dur", 0))
+                label = entry.get("title") or os.path.basename(
+                    entry.get("path", ""))
+                if dur:
+                    label += f"     {fmt_time(pos)} / {fmt_time(dur)}"
+                item = QListWidgetItem(label)
+                item.setData(Qt.UserRole, entry)
+                lst.addItem(item)
+
+            if items:
+                layout.addWidget(lst, 1)
+            else:
+                layout.addWidget(QLabel(
+                    "Nothing to continue yet on this server."))
+
+            def selected():
+                item = lst.currentItem()
+                return item.data(Qt.UserRole) if item else None
+
+            def resume():
+                entry = selected()
+                if entry:
+                    dlg.accept()
+                    self.remote_controller.cast(
+                        entry["path"], int(entry.get("pos", 0)))
+
+            def forget():
+                entry = selected()
+                if entry:
+                    self.remote_controller.forget(entry["path"])
+                    lst.takeItem(lst.row(lst.currentItem()))
+
+            def clear():
+                if QMessageBox.question(
+                    dlg, "Clear server history",
+                    "Forget all Continue Watching entries on the server?"
+                ) == QMessageBox.Yes:
+                    self.remote_controller.clear_history()
+                    dlg.accept()
+
+            lst.itemDoubleClicked.connect(lambda _: resume())
+            buttons = QHBoxLayout()
+
+            if items:
+                play_button = QPushButton("Resume")
+                play_button.setProperty("class", "accent")
+                play_button.clicked.connect(resume)
+                forget_button = QPushButton("Forget")
+                forget_button.clicked.connect(forget)
+                buttons.addWidget(play_button)
+                buttons.addWidget(forget_button)
+
+            clear_button = QPushButton("Clear all")
+            clear_button.clicked.connect(clear)
+            buttons.addStretch(1)
+            buttons.addWidget(clear_button)
+            layout.addLayout(buttons)
+
+            close = QDialogButtonBox(QDialogButtonBox.Close)
+            close.rejected.connect(dlg.reject)
+            layout.addWidget(close)
+            dlg.exec()
+
+        run_async(self.remote_controller.client.history, done)
+
+    def _remote_audio_menu(self):
+        audio = self.remote_controller.snapshot.get("audio") or {}
+        tracks = audio.get("tracks") or []
+        current = audio.get("current")
+        menu = QMenu(self)
+
+        for track in tracks:
+            index = track.get("i")
+            mark = "●  " if index == current else "     "
+            action = menu.addAction(
+                mark + track.get("label", f"Track {index}"))
+            action.triggered.connect(
+                lambda _=False, i=index:
+                self.remote_controller.select_audio(i))
+
+        if not menu.isEmpty():
+            menu.exec(self.b_audio.mapToGlobal(
+                self.b_audio.rect().bottomLeft()))
+
+    def _remote_subs_menu(self):
+        subs = self.remote_controller.snapshot.get("subs") or {}
+        tracks = subs.get("tracks") or []
+        current = subs.get("current")
+        menu = QMenu(self)
+
+        off = menu.addAction(
+            ("●  " if current is None else "     ") + "Off")
+        off.triggered.connect(
+            lambda: self.remote_controller.select_subtitle(None))
+        menu.addSeparator()
+
+        for track in tracks:
+            index = track.get("i")
+            mark = "●  " if index == current else "     "
+            action = menu.addAction(
+                mark + track.get("label", f"Subtitle {index}"))
+            action.triggered.connect(
+                lambda _=False, i=index:
+                self.remote_controller.select_subtitle(i))
+
+        menu.exec(self.b_subs.mapToGlobal(
+            self.b_subs.rect().bottomLeft()))
+
+    def _remote_chapters_menu(self):
+        chapters = self.remote_controller.snapshot.get("chapters") or []
+        menu = QMenu(self)
+
+        for chapter in chapters:
+            start = int(chapter.get("start", 0))
+            title = chapter.get("title", "Chapter")
+            action = menu.addAction(
+                f"{fmt_time(start)}    {title}")
+            action.triggered.connect(
+                lambda _=False, seconds=start:
+                self.remote_controller.jump_to(seconds))
+
+        if not menu.isEmpty():
+            menu.exec(self.b_chapters.mapToGlobal(
+                self.b_chapters.rect().bottomLeft()))
+
+    # ---- server-side media browsing ----
+    def _remote_browse(self, sub=""):
+        if not self.connected_mode:
+            return
+        self._remote_sub = sub
+        self._remote_browse_seq += 1
+        seq = self._remote_browse_seq
+        src = self.source_box.currentIndex()
+        self.browse_stack.setCurrentWidget(self.results)
+        self.results.clear()
+        if src < 0:
+            return
+        self.results.addItem("Loading server files…")
+
+        def done(result):
+            if seq != self._remote_browse_seq:
+                return
+            self._remote_fill(result, sub)
+
+        run_async(
+            lambda: self.remote_controller.client.browse(src, sub),
+            done,
+        )
+
+    def _remote_search(self):
+        query = self.search_box.text().strip()
+        if not query:
+            self._remote_browse(self._remote_sub)
+            return
+        src = self.source_box.currentIndex()
+        if src < 0:
+            return
+        self._remote_browse_seq += 1
+        seq = self._remote_browse_seq
+        self.browse_stack.setCurrentWidget(self.results)
+        self.results.clear()
+        self.results.addItem("Searching server…")
+
+        def done(result):
+            if seq != self._remote_browse_seq:
+                return
+            self._remote_fill(result, None)
+
+        run_async(
+            lambda: self.remote_controller.client.search(src, query),
+            done,
+        )
+
+    def _remote_fill(self, result, sub):
+        self.results.clear()
+        if not isinstance(result, dict) or not result.get("ok"):
+            message = (
+                result.get("error", "Server unavailable")
+                if isinstance(result, dict)
+                else "Server unavailable"
+            )
+            self.results.addItem(f"⚠ {message}")
+            return
+
+        if sub is not None and result.get("up") is not None:
+            up = QListWidgetItem("📁  ..")
+            up.setData(Qt.UserRole, {
+                "up": True, "rel": result["up"], "dir": True,
+            })
+            self.results.addItem(up)
+
+        entries = result.get("entries") or []
+        for entry in entries:
+            label = ("📁  " if entry.get("dir") else "🎬  ")
+            item = QListWidgetItem(label + entry.get("name", "?"))
+            item.setData(Qt.UserRole, entry)
+            self.results.addItem(item)
+
+        if not entries and self.results.count() == 0:
+            self.results.addItem("No media found.")
+
+        if result.get("truncated"):
+            self.results.addItem(
+                "More matches exist — narrow your search.")
 
     # ---- status surface + startup health ----
     def _status(self, msg, timeout=6000):
@@ -266,6 +634,9 @@ class MainWindow(QMainWindow):
 
     def _play(self, path):
         """Play a browsed file, offering to resume if we remember a position."""
+        if self.connected_mode:
+            self._remote_play(path)
+            return
         r = history.resume_pos(path)
         resume = 0
         if r > 0:
@@ -280,6 +651,14 @@ class MainWindow(QMainWindow):
         self.engine.cast(path, resume)
 
     def cast_selected(self):
+        if self.connected_mode:
+            item = self.results.currentItem()
+            entry = item.data(Qt.UserRole) if item else None
+            if isinstance(entry, dict) and not entry.get("dir") and entry.get("path"):
+                self._play(entry["path"])
+            else:
+                self._status("Select a video file first")
+            return
         p = self._sel_path()
         if p:
             self._play(p)
@@ -297,7 +676,11 @@ class MainWindow(QMainWindow):
         self.target_box.blockSignals(False)
 
     def _target_changed(self, idx):
-        self.engine.set_target_index(idx)   # engine applies + renders + polls
+        if self.connected_mode:
+            if idx >= 0:
+                self.remote_controller.select_target(idx)
+        else:
+            self.engine.set_target_index(idx)
 
     def _root_at(self, path):
         if path and os.path.isdir(path):
@@ -307,6 +690,11 @@ class MainWindow(QMainWindow):
         return False
 
     def _source_changed(self, idx):
+        if self.connected_mode:
+            if idx >= 0:
+                self.search_box.clear()
+                self._remote_browse("")
+            return
         if getattr(self, "search_box", None) and self.search_box.text():
             self.search_box.clear()   # results belong to the old source; back to tree
         s = self.source_box.itemData(idx) if idx >= 0 else None
@@ -334,6 +722,13 @@ class MainWindow(QMainWindow):
 
     # ---- recursive search within the current source ----
     def _on_search_text(self, text):
+        if self.connected_mode:
+            if text.strip():
+                self._search_timer.start()
+            else:
+                self._search_timer.stop()
+                self._remote_browse(self._remote_sub)
+            return
         if text.strip():
             self._search_timer.start()        # debounce; fires _run_search
         else:
@@ -342,6 +737,9 @@ class MainWindow(QMainWindow):
             self.browse_stack.setCurrentWidget(self.tree)
 
     def _run_search(self):
+        if self.connected_mode:
+            self._remote_search()
+            return
         q = self.search_box.text().strip()
         if not q:
             self.browse_stack.setCurrentWidget(self.tree)
@@ -379,6 +777,19 @@ class MainWindow(QMainWindow):
             self.results.addItem(QListWidgetItem("… more matches not shown — refine your search."))
 
     def _result_activated(self, item):
+        if self.connected_mode:
+            entry = item.data(Qt.UserRole)
+            if not isinstance(entry, dict):
+                return
+            if entry.get("up"):
+                self._remote_browse(entry["rel"])
+            elif entry.get("dir"):
+                self.search_box.clear()
+                self._remote_browse(entry["rel"])
+            elif entry.get("path"):
+                self._play(entry["path"])
+            return
+
         path = item.data(Qt.UserRole)
         if not path:
             return
@@ -414,6 +825,9 @@ class MainWindow(QMainWindow):
 
     def show_continue(self):
         """Continue-watching list: resume on the current target, forget, or clear."""
+        if self.connected_mode:
+            self._remote_continue()
+            return
         items = [it for it in history.recent() if it.get("path") != self.engine._now_path]
         dlg = QDialog(self); dlg.setWindowTitle("Continue watching"); dlg.resize(460, 420)
         lay = QVBoxLayout(dlg)
@@ -464,15 +878,27 @@ class MainWindow(QMainWindow):
 
     # Transport / navigation delegate to the engine (remote.py calls these by name).
     def go_next(self):
-        self.engine.go_next()
+        if self.connected_mode:
+            self.remote_controller.transport("next")
+        else:
+            self.engine.go_next()
 
     def go_prev(self):
-        self.engine.go_prev()
+        if self.connected_mode:
+            self.remote_controller.transport("prev")
+        else:
+            self.engine.go_prev()
 
     def _set_autonext(self, on):
-        self.engine.set_autonext(on)
+        if self.connected_mode:
+            self.remote_controller.set_autonext(on)
+        else:
+            self.engine.set_autonext(on)
 
     def _subs_menu(self):
+        if self.connected_mode:
+            self._remote_subs_menu()
+            return
         subs = self.engine._media.get("subs", [])
         if not subs:
             return
@@ -489,6 +915,9 @@ class MainWindow(QMainWindow):
         menu.exec(self.b_subs.mapToGlobal(self.b_subs.rect().bottomLeft()))
 
     def _audio_menu(self):
+        if self.connected_mode:
+            self._remote_audio_menu()
+            return
         tracks = self.engine._media.get("audio", [])
         if len(tracks) < 2:
             return
@@ -502,6 +931,9 @@ class MainWindow(QMainWindow):
         menu.exec(self.b_audio.mapToGlobal(self.b_audio.rect().bottomLeft()))
 
     def _chapters_menu(self):
+        if self.connected_mode:
+            self._remote_chapters_menu()
+            return
         chaps = self.engine._media.get("chapters", [])
         if not chaps:
             return
@@ -525,7 +957,10 @@ class MainWindow(QMainWindow):
         return self.engine.stop()
 
     def closeEvent(self, event):
-        self.engine.shutdown()     # save position + shut down targets
+        if self.connected_mode:
+            self.remote_controller.close()
+        else:
+            self.engine.shutdown()
         if self.httpd:
             try:
                 self.httpd.shutdown()
@@ -534,7 +969,24 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _transport(self, fn):
-        self.engine.transport(fn)
+        if self.connected_mode:
+            actions = {
+                self._t_rewind: "rewind",
+                self._t_forward: "forward",
+                self._t_playpause: "playpause",
+                self._t_stop: "stop",
+            }
+            action = actions.get(fn)
+            if action:
+                self.remote_controller.transport(action)
+        else:
+            self.engine.transport(fn)
+
+    def send_tv_key(self, cmd):
+        if self.connected_mode:
+            self.remote_controller.send_tv_key(cmd)
+        else:
+            self.engine.send_key(cmd)
 
     # ---- polling ----
     # ---- phone remote (web) ----

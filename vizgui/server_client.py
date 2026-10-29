@@ -3,6 +3,7 @@
 import json
 import urllib.error
 import urllib.request
+import urllib.parse
 
 from . import config
 
@@ -70,6 +71,18 @@ class ServerClient:
         return self._request(
             f"/api/sessions/{self.session_id}/history"
         )
+
+    def browse(self, source_index=0, sub=""):
+        query = urllib.parse.urlencode({
+            "src": int(source_index), "sub": sub,
+        })
+        return self._request(f"/api/browse?{query}")
+
+    def search(self, source_index, query):
+        params = urllib.parse.urlencode({
+            "src": int(source_index), "q": query,
+        })
+        return self._request(f"/api/search?{params}")
 
     def available(self):
         try:

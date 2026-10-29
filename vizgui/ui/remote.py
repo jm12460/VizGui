@@ -95,18 +95,5 @@ class RemotePanel(QFrame):
         self.tgt_lbl.setText(f"▶ playback → {name}")
 
     def send(self, cmd):
-        def fire():
-            try:
-                r = sc_key(*KEYS[cmd])
-                res = r.get("STATUS", {}).get("RESULT", r) if isinstance(r, dict) else r
-                log.info("key %s %s -> %s", cmd, KEYS[cmd], res)
-                return r
-            except Exception as e:
-                log.warning("key %s %s FAILED: %s", cmd, KEYS[cmd], e)
-                return {"error": str(e)}
-        run_async(fire, self._sent)
-
-    def _sent(self, res):
-        # a key that didn't reach the TV should say so, not fail silently
-        if isinstance(res, dict) and "error" in res and self.win:
-            self.win._status("TV didn't respond — is it on and on the same Wi-Fi?")
+        """Delegate TV commands to the owning window/controller."""
+        self.win.send_tv_key(cmd)
