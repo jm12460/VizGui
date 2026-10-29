@@ -22,15 +22,21 @@ def main():
         connect_button = choice.addButton(
             "Connect to Server", QMessageBox.AcceptRole
         )
-        choice.addButton("Cancel", QMessageBox.RejectRole)
+        standalone_button = choice.addButton(
+            "Run Standalone", QMessageBox.ActionRole
+        )
+        choice.addButton("Quit", QMessageBox.RejectRole)
         choice.exec()
 
-        if choice.clickedButton() is not connect_button:
+        selected = choice.clickedButton()
+        if selected is connect_button:
+            from .remote_controller import RemoteController
+            controller = RemoteController(client)
+            w = MainWindow(remote_controller=controller)
+        elif selected is standalone_button:
+            w = MainWindow()
+        else:
             return
-
-        from .remote_controller import RemoteController
-        controller = RemoteController(client)
-        w = MainWindow(remote_controller=controller)
     else:
         w = MainWindow()
 
