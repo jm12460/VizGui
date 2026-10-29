@@ -10,6 +10,7 @@ import urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 from . import config
+from .server_identity import server_info, sessions_info
 from .paths import VIDEO_GLOBS
 from .sources import source_path
 from .chromecast import scan_cast_devices
@@ -58,7 +59,11 @@ class _WebHandler(BaseHTTPRequestHandler):
             return self._send(200, MOBILE_HTML, "text/html; charset=utf-8")
         if not self._authed():
             return self._json({"ok": False, "error": "unauthorized"}, 401)
-        if u.path == "/api/status":
+        if u.path == "/api/server":
+            return self._json(server_info())
+        if u.path == "/api/sessions":
+            return self._json(sessions_info())
+        if u.path in ("/api/status", "/api/sessions/default/status"):
             return self._json(self.win.web_status())
         if u.path == "/api/browse":
             q = urllib.parse.parse_qs(u.query)
@@ -68,7 +73,7 @@ class _WebHandler(BaseHTTPRequestHandler):
             return self._json(web_search(int(q.get("src", ["0"])[0]), q.get("q", [""])[0]))
         if u.path == "/api/scan":
             return self._json({"ok": True, "devices": scan_cast_devices()})
-        if u.path == "/api/history":
+        if u.path in ("/api/history", "/api/sessions/default/history"):
             return self._json({"ok": True, "items": self.win.web_history()})
         return self._send(404, "not found", "text/plain")
 
@@ -80,7 +85,7 @@ class _WebHandler(BaseHTTPRequestHandler):
             except Exception:
                 return self._json({"ok": False}, 400)
             return self._json(self.win.web_pair(pin))
-        if u.path != "/api/cmd":
+        if u.path not in ("/api/cmd", "/api/sessions/default/cmd"):
             return self._send(404, "not found", "text/plain")
         if not self._authed():
             return self._json({"ok": False, "error": "unauthorized"}, 401)
