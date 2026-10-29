@@ -1,8 +1,6 @@
 """The main window: ties media browsing, casting, transport, polling, the phone
 remote, and status together."""
 import os
-import secrets
-import time
 from PySide6.QtCore import Qt, QTimer, QDir, QModelIndex, QSize
 from PySide6.QtGui import QPixmap, QImage, QPainter, QColor
 from PySide6.QtWidgets import (
@@ -13,20 +11,16 @@ from PySide6.QtWidgets import (
 )
 
 from .. import config
-from .. import platforms
 from .. import health
 from .. import history
-from .. import probe
-from ..config import save_config, load_config
+from ..config import load_config
 from ..paths import VIDEO_GLOBS, log
-from ..smartcast import sc_status
 from ..sources import source_path
-from ..net import local_ip, lan_cidr
+from ..net import local_ip
 from ..helpers import fmt_time
 from ..qtasync import run_async
-from ..webremote import WebBridge, start_web_server, web_path_ok, web_search
-from ..playback import CastTarget, VlcTarget
-from ..playback import media
+from ..webremote import WebBridge, start_web_server, web_search
+from ..engine import Engine
 from .remote import RemotePanel
 from .icons import ThemedIconProvider
 from .dialogs import SetupDialog, SmbDialog
@@ -64,25 +58,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("vizgui")
         self.resize(980, 640)
-        self.target = "cast"    # "cast" (TV via go-chromecast) or "vlc" (this PC)
-        self.targets = {"cast": CastTarget(), "vlc": VlcTarget()}   # playback adapters
-        self.active = self.targets[self.target]
-        self.now_title = None   # real filename of what we're casting (for display)
-        self.now_live = False   # True while live-transcoding (no seek, no duration)
-        self._casting = False   # True from click until the launch worker finishes
-        self.auto_next = bool(config.CFG.get("auto_next", True))
-        self._now_path = None       # the file currently cast (for "next in folder")
-        self._saw_playing = False   # True once this cast actually reached PLAYING
-        self._user_stopped = False  # True when the user hit Stop (suppresses auto-next)
-        self._recovered_cast_session = False
-        self._startup_recast_attempted = False
-        # last-known playback state, advanced locally once a second between polls
-        self._np_pos = 0; self._np_dur = 0; self._np_state = ""; self._np_playing = False
-        self._resume_base = 0       # seconds a live stream was resumed from (pos is relative)
-        self._last_save = 0.0       # throttle history writes during playback
-        self._media = {"audio": [], "subs": [], "chapters": []}   # ffprobe of current file
-        self._audio = None          # selected audio track (0-based), None = file default
-        self._sub = None            # selected subtitle (probe descriptor), None = off
+        # All playback control + state lives in the Qt-free Engine; this window is a
+        # view that drives it (timers, button clicks) and renders its state via the
+        # on_change hook, so a headless server can reuse the same engine.
+        self.engine = Engine(run_async=run_async, on_change=self._render,
+                             on_status=self._status)
 
         root = QWidget(); self.setCentralWidget(root)
         outer = QHBoxLayout(root)
@@ -172,18 +152,11 @@ class MainWindow(QMainWindow):
         self.b_cast.clicked.connect(self.cast_selected)
         self.target_box = QComboBox()
         self._reload_targets()
-        # Plain mirror of the selected target index, so the HTTP thread's web_status
-        # never touches the QComboBox off the GUI thread. Kept current in _target_changed.
-        self._web_target_index = self.target_box.currentIndex()
+        # Point the engine at the configured selection (so a VLC-only setup doesn't
+        # leave 'cast' active and poll go-chromecast with no device), then mirror it.
+        self.engine.init_target()
+        self.target_box.setCurrentIndex(self.engine.target_index)
         self.target_box.currentIndexChanged.connect(self._target_changed)
-        # sync the active target to the configured selection, so a VLC-only setup
-        # doesn't leave 'cast' active and poll go-chromecast with no device
-        t0 = self.target_box.currentData()
-        if t0:
-            self.target = t0.get("type", "cast")
-            self.active = self.targets.get(self.target, self.targets["cast"])
-            if self.target == "cast":
-                config.set_active_cast(t0)
         row.addWidget(self.b_cast)
         row.addWidget(QLabel("→"))
         row.addWidget(self.target_box)
@@ -203,7 +176,7 @@ class MainWindow(QMainWindow):
         self.b_chapters = QPushButton("Chapters ▾"); self.b_chapters.hide()
         self.b_chapters.clicked.connect(self._chapters_menu)
         self.autonext_cb = QCheckBox("Auto-play next")
-        self.autonext_cb.setChecked(self.auto_next)
+        self.autonext_cb.setChecked(self.engine.auto_next)
         self.autonext_cb.toggled.connect(self._set_autonext)
         nhdr.addWidget(nt); nhdr.addStretch(1); nhdr.addWidget(self.np_badge)
         nhdr.addWidget(self.b_subs)
@@ -233,11 +206,8 @@ class MainWindow(QMainWindow):
         outer.addWidget(split, 1)
 
         # ---- phone remote (LAN web server) ----
-        self._tv_text = ""
-        self._pair_fails = 0
-        self._pair_locked = False
         self.web_bridge = WebBridge()
-        self.web_bridge.do.connect(self._web_do)   # runs on the main thread
+        self.web_bridge.do.connect(self._on_web_do)   # marshals the action to the GUI thread
         self.httpd = None
         web = config.CFG.get("web", {})
         if web.get("enabled", True):
@@ -247,19 +217,17 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 self.web_label.setText(f"phone remote off ({e})")
 
-        # ---- pollers ----
-        self._tv_timer = QTimer(self); self._tv_timer.timeout.connect(self.poll_tv)
+        # ---- pollers (drive the engine) ----
+        self._tv_timer = QTimer(self); self._tv_timer.timeout.connect(self.engine.poll_tv)
         self._tv_timer.start(5000)
-        self._cast_timer = QTimer(self); self._cast_timer.timeout.connect(self.poll_cast)
+        self._cast_timer = QTimer(self); self._cast_timer.timeout.connect(self.engine.poll_cast)
         self._cast_timer.start(3000)
-        self._np_timer = QTimer(self); self._np_timer.timeout.connect(self._tick)
+        self._np_timer = QTimer(self); self._np_timer.timeout.connect(self.engine.tick)
         self._np_timer.start(1000)   # smooth 1s clock between the 3s status polls
-        self._refresh_remote_enabled()
-        _ct = self.target_box.currentData()
-        self.remote.set_target_label((_ct or {}).get("name") or self.target)
+        self._render()               # paint the engine's initial state
         self.statusBar().showMessage("Ready", 3000)
         self._health_check()
-        self.poll_tv(); self.poll_cast()
+        self.engine.poll_tv(); self.engine.poll_cast()
 
     # ---- status surface + startup health ----
     def _status(self, msg, timeout=6000):
@@ -308,35 +276,7 @@ class MainWindow(QMainWindow):
             box.exec()
             if box.clickedButton() is rb:
                 resume = r
-        self._cast(path, resume)
-
-    def _remember(self):
-        """Record where the current file stopped, for continue-watching. For a live
-        stream the reported pos is relative to the resume point, so add the base."""
-        if self._now_path and (self._np_dur > 0 or self.now_live):
-            base = self._resume_base if self.now_live else 0
-            history.record(self._now_path, self._np_pos + base, self._np_dur,
-                           self.now_title or "")
-            self._last_save = time.time()
-
-    def _recover_cast_item(self, st):
-        """After an app restart, reconnect the UI to the active Cast item. The
-        direct-vs-transcode matching rules live in history.recover_match."""
-        media_file = st.get("file", "")
-        m = history.recover_match(media_file, history.current(), history.recent())
-        if not m:
-            if media_file == "pipe_output":
-                log.warning("active transcode source unknown; refusing to guess from history")
-            return
-        self._now_path = m["path"]
-        self.now_title = m["title"]
-        self._resume_base = m["resume_base"]
-        self._recovered_cast_session = m["reattach"]
-        # a direct cast identified from history needs its source saved for next time
-        if media_file != "pipe_output" and (history.current() or {}).get("path") != m["path"]:
-            history.set_current(m["path"], m["title"], 0)
-        self._saw_playing = st.get("state") in ("PLAYING", "PAUSED")
-        log.info("recovered active Cast item: %s", self.now_title)
+        self.engine.cast(path, resume)
 
     def cast_selected(self):
         p = self._sel_path()
@@ -356,19 +296,7 @@ class MainWindow(QMainWindow):
         self.target_box.blockSignals(False)
 
     def _target_changed(self, idx):
-        self._web_target_index = idx   # GUI-thread cache the web status reads
-        t = self.target_box.currentData()
-        if not t:
-            return
-        self.target = t.get("type", "cast")
-        self.active = self.targets.get(self.target, self.targets["cast"])
-        if self.target == "cast":
-            config.set_active_cast(t)
-        log.info("target -> %s (%s)", self.target, t.get("name"))
-        self.remote.set_target_label(t.get("name") or self.target)
-        self.now_title = None
-        self._refresh_remote_enabled()
-        self.poll_cast()
+        self.engine.set_target_index(idx)   # engine applies + renders + polls
 
     def _root_at(self, path):
         if path and os.path.isdir(path):
@@ -473,10 +401,7 @@ class MainWindow(QMainWindow):
         self._source_changed(self.source_box.currentIndex())
 
     def _refresh_remote_enabled(self):
-        on = bool(config.HOST)
-        self.remote.set_tv_enabled(on)   # transport stays enabled; TV keys gated
-        if not on:
-            self.tv_status.setText("No SmartCast TV configured")
+        self._render()   # remote gating + TV pill are part of the full render
 
     def open_setup(self):
         dlg = SetupDialog(self)
@@ -488,7 +413,7 @@ class MainWindow(QMainWindow):
 
     def show_continue(self):
         """Continue-watching list: resume on the current target, forget, or clear."""
-        items = [it for it in history.recent() if it.get("path") != self._now_path]
+        items = [it for it in history.recent() if it.get("path") != self.engine._now_path]
         dlg = QDialog(self); dlg.setWindowTitle("Continue watching"); dlg.resize(460, 420)
         lay = QVBoxLayout(dlg)
         lst = QListWidget()
@@ -508,7 +433,7 @@ class MainWindow(QMainWindow):
             if w:
                 d = w.data(Qt.UserRole)
                 dlg.accept()
-                self._cast(d["path"], int(d.get("pos", 0)))
+                self.engine.cast(d["path"], int(d.get("pos", 0)))
 
         def forget():
             w = lst.currentItem()
@@ -536,203 +461,70 @@ class MainWindow(QMainWindow):
         lay.addWidget(bb)
         dlg.exec()
 
+    # Transport / navigation delegate to the engine (remote.py calls these by name).
     def go_next(self):
-        if self.active.native_skip():
-            run_async(lambda: self.active.skip(1), lambda _: self.poll_cast())
-        elif self._now_path:
-            nxt = media.next_file(self._now_path)
-            if nxt:
-                self._cast(nxt)
+        self.engine.go_next()
 
     def go_prev(self):
-        if self.active.native_skip():
-            run_async(lambda: self.active.skip(-1), lambda _: self.poll_cast())
-        elif self._now_path:
-            prv = media.prev_file(self._now_path)
-            if prv:
-                self._cast(prv)
+        self.engine.go_prev()
 
     def _set_autonext(self, on):
-        self.auto_next = bool(on)
-        config.CFG["auto_next"] = self.auto_next
-        try:
-            save_config(config.CFG)
-        except Exception:
-            pass
-
-    def _cast(self, path, resume=0, audio=None, sub=None):
-        self._remember()                 # save position of the file we're leaving
-        self._now_path = path
-        self._resume_base = resume
-        self._audio = audio
-        self._sub = sub
-        self._last_save = time.time()
-        self._saw_playing = False
-        self._user_stopped = False
-        ok, msg = self.active.available()
-        if not ok:
-            self.np_title.setText(msg)
-            self._status(msg)
-            return
-        self.now_title = os.path.basename(path.rstrip(os.sep)) or path
-        if self.target == "cast":
-            history.set_current(path, self.now_title, resume)
-        self._casting = True
-        self._np_pos = 0
-        self._np_playing = False
-        self.np_title.setText(f"Preparing: {self.now_title}\u2026")
-        self.np_bar.setRange(0, 0)          # indeterminate until the first status
-        self.np_time.setText("")
-        self.np_badge.hide()
-        self.b_cast.setEnabled(False)
-        items = media.folder_queue(path) if (self.auto_next and os.sep in path) else [path]
-        log.info("CAST requested: %s -> %s", path, self.active.name)
-
-        def done(res):
-            self._casting = False
-            self.b_cast.setEnabled(True)
-            if res != "playing":
-                if self.target == "cast":
-                    history.clear_current()
-                self.np_title.setText(str(res))
-                self._status(str(res))
-            self.poll_cast()
-        run_async(lambda: self.active.start(path, items, self.auto_next, resume, audio, sub), done)
-        self._media = {"audio": [], "subs": [], "chapters": []}
-        self.b_chapters.hide(); self.b_audio.hide(); self.b_subs.hide()
-        run_async(lambda: probe.probe(path), lambda r: self._probe_done(path, r))
-
-    def _probe_done(self, path, res):
-        if path != self._now_path:   # cast failed or moved on -> don't show stale controls
-            return
-        self._media = res if isinstance(res, dict) and "chapters" in res else \
-            {"audio": [], "subs": [], "chapters": []}
-        self.b_chapters.setVisible(bool(self._media.get("chapters")))
-        self.b_audio.setVisible(len(self._media.get("audio", [])) > 1)
-        self.b_subs.setVisible(bool(self._media.get("subs")))
+        self.engine.set_autonext(on)
 
     def _subs_menu(self):
-        subs = self._media.get("subs", [])
+        subs = self.engine._media.get("subs", [])
         if not subs:
             return
         menu = QMenu(self)
-        off = menu.addAction(("●  " if self._sub is None else "     ") + "Off")
-        off.triggered.connect(lambda: self._select_sub(None))
+        off = menu.addAction(("●  " if self.engine._sub is None else "     ") + "Off")
+        off.triggered.connect(lambda: self.engine.select_sub(None))
         menu.addSeparator()
         for s in subs:
-            active = self._sub is not None and self._sub.get("i") == s["i"]
+            active = self.engine._sub is not None and self.engine._sub.get("i") == s["i"]
             extra = ("  (image)" if s.get("kind") == "image" else "") + \
                     ("  [file]" if s.get("external") else "")
             act = menu.addAction(("●  " if active else "     ") + s["label"] + extra)
-            act.triggered.connect(lambda _=False, sub=s: self._select_sub(sub))
+            act.triggered.connect(lambda _=False, sub=s: self.engine.select_sub(sub))
         menu.exec(self.b_subs.mapToGlobal(self.b_subs.rect().bottomLeft()))
 
-    def _select_sub(self, sub):
-        """Turn subtitles on/off by re-casting at the current position (keeps audio)."""
-        if not self._now_path:
-            return
-        cur = self._sub.get("i") if self._sub else None
-        new = sub.get("i") if sub else None
-        if cur == new:
-            return
-        pos = self._np_pos + (self._resume_base if self.now_live else 0)
-        self._cast(self._now_path, pos, audio=self._audio, sub=sub)
-
     def _audio_menu(self):
-        tracks = self._media.get("audio", [])
+        tracks = self.engine._media.get("audio", [])
         if len(tracks) < 2:
             return
-        cur = self._audio if self._audio is not None else \
+        cur = self.engine._audio if self.engine._audio is not None else \
             next((t["i"] for t in tracks if t.get("default")), 0)
         menu = QMenu(self)
         for t in tracks:
             mark = "●  " if t["i"] == cur else "     "
             act = menu.addAction(mark + t["label"])
-            act.triggered.connect(lambda _=False, i=t["i"]: self._select_audio(i))
+            act.triggered.connect(lambda _=False, i=t["i"]: self.engine.select_audio(i))
         menu.exec(self.b_audio.mapToGlobal(self.b_audio.rect().bottomLeft()))
 
-    def _select_audio(self, i):
-        """Switch audio track by re-casting the current file at its current position."""
-        if not self._now_path or i == self._audio:
-            return
-        pos = self._np_pos + (self._resume_base if self.now_live else 0)
-        self._cast(self._now_path, pos, audio=i, sub=self._sub)
-
     def _chapters_menu(self):
-        chaps = self._media.get("chapters", [])
+        chaps = self.engine._media.get("chapters", [])
         if not chaps:
             return
         menu = QMenu(self)
         for c in chaps:
             act = menu.addAction(f"{fmt_time(c['start'])}    {c['title']}")
-            act.triggered.connect(lambda _=False, s=c["start"]: self._jump_to(s))
+            act.triggered.connect(lambda _=False, s=c["start"]: self.engine.jump_to(s))
         menu.exec(self.b_chapters.mapToGlobal(self.b_chapters.rect().bottomLeft()))
 
-    def _jump_to(self, secs):
-        """Jump to an absolute time (chapter). A live stream can't seek, so restart
-        it at the offset; direct cast and VLC seek in place."""
-        secs = int(secs)
-        if self.now_live and self._now_path:
-            self._cast(self._now_path, secs, audio=self._audio, sub=self._sub)
-        else:
-            run_async(lambda: self.active.seek_to(secs), lambda _: self.poll_cast())
-
+    # Transport buttons (used by remote.py via win._transport(win._t_*)).
     def _t_rewind(self):
-        return self.active.seek(-30)
+        return self.engine.rewind()
 
     def _t_forward(self):
-        return self.active.seek(30)
+        return self.engine.forward()
 
     def _t_playpause(self):
-        return self.active.pause()
+        return self.engine.playpause()
 
     def _t_stop(self):
-        self._user_stopped = True
-        if self.target == "cast":
-            history.clear_current()
-        self._remember()
-        if self.target == "vlc":
-            self.now_title = None
-        return self.active.stop()
-
-    def _on_ended(self, allow_auto_next=True, finished=True):
-        """Current item finished. Auto-advance if the target needs us to, else clear."""
-        old_path = self._now_path
-        unknown_duration_live_end = finished and self.now_live and self._np_dur <= 0
-        if not unknown_duration_live_end:
-            self._remember()             # finished -> dropped from the continue list
-        nxt = (media.next_file(self._now_path)
-               if allow_auto_next and self.auto_next and not self._user_stopped
-               and self._now_path and self.active.needs_advance_on_end() else None)
-        if nxt:
-            log.info("auto-next -> %s", os.path.basename(nxt))
-            self._cast(nxt)
-            if unknown_duration_live_end:
-                history.forget(old_path)
-            return
-        history.clear_current()
-        if unknown_duration_live_end:
-            history.forget(old_path)
-        self.active.shutdown()
-        self.now_title = None
-        self.now_live = False
-        self._saw_playing = False
-        self._now_path = None
-        self._np_playing = False
-        self._media = {"audio": [], "subs": [], "chapters": []}
-        self._audio = None
-        self._sub = None
-        self.b_chapters.hide(); self.b_audio.hide(); self.b_subs.hide()
-        self.np_badge.hide()
-        self.np_title.setText("Nothing playing.")
-        self.np_bar.setRange(0, 1000)
-        self.np_bar.setValue(0)
-        self.np_time.setText("")
+        return self.engine.stop()
 
     def closeEvent(self, event):
-        self._remember()
-        for t in self.targets.values():
-            t.shutdown()           # cast: kill the server; vlc: leave it running
+        self.engine.shutdown()     # save position + shut down targets
         if self.httpd:
             try:
                 self.httpd.shutdown()
@@ -741,22 +533,9 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _transport(self, fn):
-        run_async(fn, lambda _: self.poll_cast())
+        self.engine.transport(fn)
 
     # ---- polling ----
-    def poll_tv(self):
-        if not config.HOST:
-            return
-        run_async(sc_status, self._tv_done)
-
-    def _tv_done(self, s):
-        if "error" in s:
-            self._tv_text = "TV: unreachable"
-        else:
-            m = "  muted" if s["mute"] == "On" else ""
-            self._tv_text = f"TV {s['power']}  ·  {s['input']}  ·  vol {s['vol']}{m}"
-        self.tv_status.setText(self._tv_text)
-
     # ---- phone remote (web) ----
     def _update_web_label(self):
         web = config.CFG.get("web", {})
@@ -785,197 +564,63 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def new_pairing(self):
-        """Rotate BOTH the auth token (= the QR) and the PIN. Every paired phone
-        is un-paired and must scan/enter the new credentials."""
-        w = config.CFG.setdefault("web", {})
-        w["token"] = secrets.token_urlsafe(24)
-        w["pin"] = f"{secrets.randbelow(1000000):06d}"
-        self._pair_fails = 0
-        self._pair_locked = False
-        try:
-            save_config(config.CFG)
-        except Exception:
-            pass
+        self.engine.new_pairing()
 
     def web_pair(self, pin):
-        """Validate a pairing PIN (HTTP thread) and hand back the auth token."""
-        if self._pair_locked:
-            return {"ok": False, "locked": True}
-        want = str(config.CFG.get("web", {}).get("pin", ""))
-        if pin and want and secrets.compare_digest(str(pin), want):
-            self._pair_fails = 0
-            return {"ok": True, "token": config.CFG["web"]["token"]}
-        self._pair_fails += 1
-        if self._pair_fails >= 5:
-            self._pair_locked = True
-        return {"ok": False, "locked": self._pair_locked}
+        return self.engine.web_pair(pin)
 
     def web_history(self):
-        """Continue-watching items for the phone, minus whatever's playing now
-        (so the current file isn't duplicated under the now-playing bar)."""
-        cur = self._now_path
-        return [it for it in history.recent() if it.get("path") != cur]
+        return self.engine.web_history()
 
     def web_status(self):
-        """Snapshot for the phone UI - reads cached state only (HTTP-thread safe)."""
-        def tname(t):
-            base = t.get("name") or t.get("type", "?")
-            return base + (" (Cast)" if t.get("type") == "cast" else "")
-        targets = [{"i": i, "name": tname(t)} for i, t in enumerate(config.CFG.get("targets", []))]
-        sources = [{"i": i, "name": s.get("name") or s.get("path", "?")}
-                   for i, s in enumerate(config.CFG.get("sources", []))]
-        return {
-            "ok": True,
-            "target_index": self._web_target_index,
-            "targets": targets,
-            "sources": sources,
-            "auto_next": self.auto_next,
-            "tv": self._tv_text if config.HOST else "",
-            "now": {"title": self.now_title or "", "pos": self._np_pos,
-                    "dur": self._np_dur, "state": self._np_state, "live": self.now_live},
-            "chapters": self._media.get("chapters", []),
-            "audio": {"tracks": self._media.get("audio", []), "current": self._audio},
-            "subs": {"tracks": self._media.get("subs", []),
-                     "current": self._sub.get("i") if self._sub else None},
-        }
+        return self.engine.web_status()
 
     def web_add_cast(self, dev):
-        """Add a Cast device discovered from the phone, then switch to it."""
-        addr = dev.get("addr")
-        if not addr:
-            return
-        targets = config.CFG.setdefault("targets", [])
-        if not any(t.get("type") == "cast" and t.get("addr") == addr for t in targets):
-            targets.append({"type": "cast", "name": dev.get("name") or addr,
-                            "addr": addr, "cast_port": dev.get("cast_port") or "8009"})
-            try:
-                save_config(config.CFG)
-            except Exception as e:
-                log.warning("save after web add-cast failed: %s", e)
-            self._reload_targets()
-        for i in range(self.target_box.count()):
-            t = self.target_box.itemData(i)
-            if t and t.get("type") == "cast" and t.get("addr") == addr:
-                self.target_box.setCurrentIndex(i)
-                break
-        self._status(f"Added {dev.get('name') or addr}")
+        self.engine.web_add_cast(dev)
 
-    def _web_do(self, kind, p):
-        """Apply a phone action on the main thread."""
-        try:
-            if kind == "key":
-                self.remote.send(p["cmd"])
-            elif kind == "transport":
-                act = p.get("action")
-                if act == "next":
-                    self.go_next()
-                elif act == "prev":
-                    self.go_prev()
-                else:
-                    fn = {"rewind": self._t_rewind, "playpause": self._t_playpause,
-                          "forward": self._t_forward, "stop": self._t_stop}.get(act)
-                    if fn:
-                        self._transport(fn)
-            elif kind == "target":
-                self.target_box.setCurrentIndex(int(p["index"]))
-            elif kind == "addcast":
-                self.web_add_cast(p)
-            elif kind == "autonext":
-                self.autonext_cb.setChecked(bool(p.get("on")))
-            elif kind == "cast":
-                path = p.get("path", "")
-                if (path.lower().endswith(tuple(g[1:] for g in VIDEO_GLOBS))
-                        and web_path_ok(path)):
-                    self._cast(path, int(p.get("resume", 0) or 0))
-                else:
-                    log.warning("web cast refused (outside sources): %s", path)
-            elif kind == "forget":
-                history.forget(p.get("path", ""))
-            elif kind == "clear":
-                history.clear()
-            elif kind == "jump":
-                self._jump_to(int(p.get("secs", 0) or 0))
-            elif kind == "audio":
-                self._select_audio(int(p.get("i", 0) or 0))
-            elif kind == "sub":
-                i = p.get("i")
-                s = None if i is None else next(
-                    (x for x in self._media.get("subs", []) if x.get("i") == int(i)), None)
-                self._select_sub(s)
-        except Exception as e:
-            log.warning("web action %s failed: %s", kind, e)
+    def _on_web_do(self, kind, p):
+        """A phone action, delivered on the GUI thread by web_bridge -> engine."""
+        self.engine.web_do(kind, p)
 
-    def poll_cast(self):
-        run_async(self.active.status, self._poll_done)
-
-    def _poll_done(self, st):
-        if not isinstance(st, dict):
-            return
-        if st.get("idle"):
-            # our process still starting, or mid-launch -> transient, keep state
-            if self._casting or st.get("busy"):
-                return
-            if self._saw_playing:
-                # Cast receivers can drop a paused session and report Idle. That
-                # is not evidence the episode finished, so don't jump to the
-                # next file if our last confirmed playback state was PAUSED.
-                paused = self._np_state == "PAUSED"
-                if paused:
-                    log.info("playback went idle while paused; suppressing auto-next")
-                self._on_ended(allow_auto_next=not paused, finished=not paused)
-                return
-            self.now_title = None
-            self.now_live = False
-            self._np_playing = False
-            self._now_path = None
-            self._media = {"audio": [], "subs": [], "chapters": []}
-            self._audio = None
-            self._sub = None
-            if self.target == "cast":
-                history.clear_current()
+    # ---- rendering: reflect the engine's state into the widgets ----
+    def _render(self):
+        """Called on every engine state change (poll result, tick, action)."""
+        e = self.engine
+        if e._message:
+            self.np_title.setText(e._message)
             self.np_badge.hide()
-            self.b_chapters.hide(); self.b_audio.hide(); self.b_subs.hide()
+            self.np_bar.setRange(0, 0); self.np_time.setText("")
+        elif e._casting:
+            self.np_title.setText(f"Preparing: {e.now_title}…")
+            self.np_badge.hide()
+            self.np_bar.setRange(0, 0); self.np_time.setText("")
+        elif not e._now_path:
             self.np_title.setText("Nothing playing.")
-            self.np_bar.setRange(0, 1000); self.np_bar.setValue(0)
-            self.np_time.setText("")
-            return
-        if self.target == "cast" and not self._now_path:
-            self._recover_cast_item(st)
-        self.now_live = st.get("live", False)
-        if st.get("path"):          # MPRIS gives the real path -> Next/Prev + title
-            self._now_path = st["path"]
-        if self.target == "vlc":
-            title = st.get("file") or self.now_title or "VLC"
+            self.np_badge.hide()
+            self.np_bar.setRange(0, 1000); self.np_bar.setValue(0); self.np_time.setText("")
         else:
-            status_title = st.get("file") or "Playing"
-            if status_title == "pipe_output":
-                status_title = "Live cast"
-            title = self.now_title or status_title
-        self.np_title.setText(title)
-        self._np_pos = st.get("pos", 0)
-        self._np_dur = st.get("dur", 0)
-        self._np_state = st.get("state", "")
-        self._np_playing = self._np_state in ("PLAYING", "")
-        if self._np_state == "PLAYING":
-            self._saw_playing = True
-        if (self._recovered_cast_session and not self._startup_recast_attempted
-                and self._np_state == "PLAYING" and self._now_path):
-            # The previous app owned the local HTTP stream. Re-open it from the
-            # receiver's current position before its remaining buffer runs out.
-            resume = self._np_pos + (self._resume_base if self.now_live else 0)
-            self._startup_recast_attempted = True
-            self._recovered_cast_session = False
-            log.info("reattaching to Cast stream at %ss: %s", resume, self.now_title)
-            self._cast(self._now_path, resume)
-            return
-        if self._np_playing and time.time() - self._last_save > 12:
-            self._remember()         # periodic save so a crash loses little
-        self._render_np()
+            self.np_title.setText(e._display_title)
+            self._render_np()
+        # track-selection buttons + cast button + auto-next mirror engine state
+        self.b_chapters.setVisible(bool(e._media.get("chapters")))
+        self.b_audio.setVisible(len(e._media.get("audio", [])) > 1)
+        self.b_subs.setVisible(bool(e._media.get("subs")))
+        self.b_cast.setEnabled(not e._casting)
+        if self.autonext_cb.isChecked() != e.auto_next:
+            self.autonext_cb.blockSignals(True)
+            self.autonext_cb.setChecked(e.auto_next)
+            self.autonext_cb.blockSignals(False)
+        self._sync_target_box()
+        self.remote.set_target_label(e.active_target_name())
+        on = bool(config.HOST)
+        self.remote.set_tv_enabled(on)          # transport stays enabled; TV keys gated
+        self.tv_status.setText((e._tv_text or "TV: …") if on else "No SmartCast TV configured")
 
     def _render_np(self):
-        pos, dur, state = self._np_pos, self._np_dur, self._np_state
-        self.np_badge.setVisible(self.now_live)
-        if self.now_live:
+        e = self.engine
+        pos, dur, state = e._np_pos, e._np_dur, e._np_state
+        self.np_badge.setVisible(e.now_live)
+        if e.now_live:
             self.np_bar.setRange(0, 0)   # live: no real duration/seek
             mark = state.lower() if state and state != "PLAYING" else "live"
             self.np_time.setText(f"{fmt_time(pos)}  ·  {mark}")
@@ -987,11 +632,13 @@ class MainWindow(QMainWindow):
             self.np_bar.setRange(0, 0)   # unknown duration (still buffering)
             self.np_time.setText(state.lower())
 
-    def _tick(self):
-        """Advance the displayed position one second between polls (smooth clock)."""
-        if self._np_playing and (self.now_live or self._np_dur > 0):
-            if not self.now_live and self._np_dur:
-                self._np_pos = min(self._np_pos + 1, self._np_dur)
-            else:
-                self._np_pos += 1
-            self._render_np()
+    def _sync_target_box(self):
+        """Mirror the engine's target selection in the picker (rebuild only if the
+        target list changed, e.g. a cast was added from the phone)."""
+        targets = config.CFG.get("targets", [])
+        if self.target_box.count() != len(targets):
+            self._reload_targets()
+        if self.target_box.currentIndex() != self.engine.target_index:
+            self.target_box.blockSignals(True)
+            self.target_box.setCurrentIndex(self.engine.target_index)
+            self.target_box.blockSignals(False)
