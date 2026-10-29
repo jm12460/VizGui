@@ -1,6 +1,6 @@
 """Phone remote: a token-gated LAN web server serving the mobile page + a small
-JSON API. Reads (status/browse) run on the HTTP thread; writes are marshaled to
-the Qt main thread via ``MainWindow.web_bridge`` (see ui.py).
+JSON API. Reads (status/browse) run on HTTP threads; writes go through
+the injected controller dispatch (Qt bridge in GUI, command queue headless).
 """
 import json
 import os
@@ -8,8 +8,6 @@ import secrets
 import threading
 import urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-
-from PySide6.QtCore import QObject, Signal
 
 from . import config
 from .paths import VIDEO_GLOBS
@@ -90,7 +88,11 @@ class _WebHandler(BaseHTTPRequestHandler):
             body = self._body()
         except Exception:
             return self._json({"ok": False, "error": "bad body"}, 400)
-        self.win.web_bridge.do.emit(body.get("kind", ""), body)
+        dispatch = getattr(self.win, "web_dispatch", None)
+        if dispatch is not None:
+            dispatch(body.get("kind", ""), body)
+        else:
+            self.win.web_bridge.do.emit(body.get("kind", ""), body)
         return self._json({"ok": True})
 
 
@@ -206,10 +208,6 @@ def web_path_ok(path):
         if root and (tgt == root or tgt.startswith(root + os.sep)):
             return True
     return False
-
-
-class WebBridge(QObject):
-    do = Signal(str, object)
 
 
 def start_web_server(win, port):

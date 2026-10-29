@@ -19,7 +19,8 @@ from ..sources import source_path
 from ..net import local_ip
 from ..helpers import fmt_time
 from ..qtasync import run_async
-from ..webremote import WebBridge, start_web_server, web_search
+from ..webremote import start_web_server, web_search
+from .webbridge import WebBridge
 from ..engine import Engine
 from .remote import RemotePanel
 from .icons import ThemedIconProvider

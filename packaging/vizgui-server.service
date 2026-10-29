@@ -1,0 +1,15 @@
+[Unit]
+Description=VizGui headless casting server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Install vizgui into the Python environment used by this command.
+# For a venv, replace /usr/bin/python with /path/to/venv/bin/python.
+ExecStart=/usr/bin/python -m vizgui.server --no-print-pin
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
