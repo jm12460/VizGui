@@ -95,3 +95,31 @@ def test_server_metadata_endpoint():
 def test_reject_invalid_session_id():
     with pytest.raises(ValueError):
         ServerClient(session_id="../other")
+
+
+def test_connection_status_uses_atomic_status_identity():
+    client = ServerClient(token="test")
+    status = {"ok": True, "server": {"id": "a", "instance_id": "b"}}
+    with mock.patch.object(client, "status", return_value=status), \
+         mock.patch.object(client, "server_info") as info:
+        assert client.connection_status() == status
+        info.assert_not_called()
+
+
+def test_connection_status_supports_older_servers():
+    client = ServerClient(token="test")
+    with mock.patch.object(client, "status", return_value={"ok": True}), \
+         mock.patch.object(client, "server_info", return_value={"ok": True, "id": "a"}):
+        assert client.connection_status() == {
+            "ok": True, "server": {"ok": True, "id": "a"}}
+
+
+def test_bound_command_sends_server_preconditions():
+    client = ServerClient(token="test")
+    with mock.patch("urllib.request.urlopen", return_value=FakeResponse()) as open_url:
+        client.command_for_server({"id": "a", "instance_id": "b"},
+                                  "transport", action="stop")
+    request = open_url.call_args.args[0]
+    assert request.get_header("X-viz-server-id") == "a"
+    assert request.get_header("X-viz-instance-id") == "b"
+    assert json.loads(request.data) == {"kind": "transport", "action": "stop"}

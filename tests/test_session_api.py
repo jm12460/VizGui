@@ -148,3 +148,38 @@ def test_unknown_session_returns_404(api_server):
         request(base, "/api/sessions/nonexistent/status")
 
     assert exc.value.code == 404
+
+
+@pytest.mark.parametrize("field", ["id", "instance_id"])
+def test_stale_command_rejected_before_dispatch(api_server, field):
+    base, controller = api_server
+    info = request(base, "/api/server")
+    info[field] = "old-value"
+    req = urllib.request.Request(
+        base + "/api/sessions/default/cmd",
+        data=json.dumps({"kind": "transport", "action": "stop"}).encode(),
+        headers={"X-Viz-Token": "test-secret", "Content-Type": "application/json",
+                 "X-Viz-Server-Id": info["id"],
+                 "X-Viz-Instance-Id": info["instance_id"]},
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req, timeout=3)
+    assert exc.value.code == 409
+    assert controller.commands == []
+
+
+def test_current_instance_command_dispatched(api_server):
+    base, controller = api_server
+    status = request(base, "/api/sessions/default/status")
+    info = status["server"]
+    assert info == request(base, "/api/server")
+    req = urllib.request.Request(
+        base + "/api/sessions/default/cmd",
+        data=json.dumps({"kind": "transport", "action": "playpause"}).encode(),
+        headers={"X-Viz-Token": "test-secret", "Content-Type": "application/json",
+                 "X-Viz-Server-Id": info["id"],
+                 "X-Viz-Instance-Id": info["instance_id"]},
+    )
+    with urllib.request.urlopen(req, timeout=3) as response:
+        assert json.load(response)["ok"] is True
+    assert len(controller.commands) == 1

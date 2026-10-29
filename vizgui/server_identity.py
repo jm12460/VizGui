@@ -9,6 +9,7 @@ from .paths import CONFIG_DIR
 
 IDENTITY_PATH = os.path.join(CONFIG_DIR, "server-identity.json")
 DEFAULT_SESSION = "default"
+INSTANCE_ID = str(uuid.uuid4())
 
 
 def server_identity():
@@ -40,6 +41,7 @@ def server_info():
     return {
         "ok": True,
         "id": server_identity(),
+        "instance_id": INSTANCE_ID,
         "name": socket.gethostname(),
         "api_version": 1,
         "capabilities": ["default-session", "casting", "history"],

@@ -64,7 +64,7 @@ class _WebHandler(BaseHTTPRequestHandler):
         if u.path == "/api/sessions":
             return self._json(sessions_info())
         if u.path in ("/api/status", "/api/sessions/default/status"):
-            return self._json(self.win.web_status())
+            return self._json({**self.win.web_status(), "server": server_info()})
         if u.path == "/api/browse":
             q = urllib.parse.parse_qs(u.query)
             return self._json(web_browse(int(q.get("src", ["0"])[0]), q.get("sub", [""])[0]))
@@ -89,6 +89,15 @@ class _WebHandler(BaseHTTPRequestHandler):
             return self._send(404, "not found", "text/plain")
         if not self._authed():
             return self._json({"ok": False, "error": "unauthorized"}, 401)
+        expected_id = self.headers.get("X-Viz-Server-Id")
+        expected_instance = self.headers.get("X-Viz-Instance-Id")
+        if expected_id is not None or expected_instance is not None:
+            info = server_info()
+            if ((expected_id is not None and expected_id != info["id"])
+                    or (expected_instance is not None
+                        and expected_instance != info["instance_id"])):
+                return self._json(
+                    {"ok": False, "error": "Server connection changed"}, 409)
         try:
             body = self._body()
         except Exception:

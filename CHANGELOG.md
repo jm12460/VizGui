@@ -6,6 +6,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Disabled the bottom-right Qt resize grip across all shared popup dialogs,
+  including after showing them, matching the Appearance window fix.
+- Setup, pairing, resume, confirmation, input, and error dialogs now use
+  non-modal callbacks to avoid XWayland cursor trapping. Track/chapter menus
+  no longer start nested event loops. Cancelling Resume leaves playback alone,
+  and closing Setup cancels its pending prompts without applying their results.
+- Continue Watching opens non-modally in connected and standalone mode to avoid
+  X11/XWayland cursor trapping, matching the Appearance window behavior.
+- Connected desktops verify server installation identity and detect process
+  restarts from fresh status responses. Updated servers reject commands intended
+  for a previous process; a different installation is not trusted automatically.
+- Connected desktops retain the last playback display during temporary server
+  outages and retry with a delay capped at 30 seconds.
+- Remote commands are blocked while disconnected and queued commands are
+  discarded after connection changes. Late callbacks from a closed controller
+  cannot update a reopened connection; commands are never automatically retried.
+
 ## [0.4.1] - 2026-10-29
 
 ### Added

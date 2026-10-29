@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QMessageBox,
 )
 
+from ..qtpopups import message, dismiss_dialogs
 from ..qtasync import run_async
 from ..server_client import ServerClient
 
@@ -76,9 +77,9 @@ class ConnectedWindow(QMainWindow):
     def send(self, action):
         def completed(result):
             if not isinstance(result, dict) or not result.get("ok"):
-                QMessageBox.warning(
+                message(
                     self, "VizGui",
-                    "Could not send command to the server."
+                    "Could not send command to the server.", QMessageBox.Warning
                 )
             self.refresh()
 
@@ -90,5 +91,6 @@ class ConnectedWindow(QMainWindow):
         )
 
     def closeEvent(self, event):
+        dismiss_dialogs(self)
         self.timer.stop()
         super().closeEvent(event)

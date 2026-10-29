@@ -26,9 +26,13 @@ class ServerClient:
             raise ValueError("Invalid session ID")
         self.session_id = session_id
 
-    def _request(self, path, payload=None):
+    def _request(self, path, payload=None, expected_server=None):
         url = f"http://{self.host}:{self.port}{path}"
         headers = {"X-Viz-Token": self.token}
+        if expected_server:
+            headers["X-Viz-Server-Id"] = expected_server["id"]
+            if expected_server.get("instance_id"):
+                headers["X-Viz-Instance-Id"] = expected_server["instance_id"]
         data = None
 
         if payload is not None:
@@ -65,6 +69,20 @@ class ServerClient:
         return self._request(
             f"/api/sessions/{self.session_id}/cmd",
             {**payload, "kind": kind},
+        )
+
+    def connection_status(self):
+        """Read identity with state; older servers expose identity separately."""
+        status = self.status()
+        if isinstance(status, dict) and status.get("ok") is True:
+            if "server" not in status:
+                status = {**status, "server": self.server_info()}
+        return status
+
+    def command_for_server(self, server, kind, **payload):
+        return self._request(
+            f"/api/sessions/{self.session_id}/cmd",
+            {**payload, "kind": kind}, expected_server=server,
         )
 
     def history(self):

@@ -39,6 +39,13 @@ When a server is detected, the desktop offers:
 
 The headless server currently supports one playback-owning session.
 
+Connected desktops retry temporary connection failures automatically while
+keeping the last playback display. A different server installation at the same
+address requires closing and reopening the desktop. Updated servers identify
+each process and reject commands intended for a previous process; older servers
+support installation checks but cannot provide this restart safeguard. These
+changes take effect when the server is next started; updating never restarts it.
+
 
 ## Features
 - **Two playback targets:** cast to a Chromecast / SmartCast TV, or play on this

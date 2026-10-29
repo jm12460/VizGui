@@ -20,6 +20,7 @@ from ..net import local_ip
 from ..helpers import fmt_time
 from ..qtasync import run_async
 from ..webremote import start_web_server, web_search
+from ..qtpopups import show_dialog, message, confirm, popup_menu, dismiss_dialogs
 from .webbridge import WebBridge
 from ..engine import Engine
 from .remote import RemotePanel
@@ -245,6 +246,8 @@ class MainWindow(QMainWindow):
             self.remote_controller.connection_changed.connect(
                 self._remote_connection_changed)
             self.remote_controller.error.connect(self._status)
+            self.remote_controller.server_restarted.connect(
+                lambda: self._status("VizGui server restarted — playback state refreshed"))
 
             # Local filesystem paths are not necessarily server paths.
             # Remote browsing will replace these controls in the next step.
@@ -282,7 +285,7 @@ class MainWindow(QMainWindow):
         if connected:
             self._status("Connected to VizGui server")
         else:
-            self._status("Server connection lost")
+            self._status("Server connection lost — retrying automatically")
             self.remote.set_tv_enabled(False)
 
     def _render_remote(self, status):
@@ -366,6 +369,8 @@ class MainWindow(QMainWindow):
     def _remote_play(self, path):
         """Offer the server's saved position before casting a remote file."""
         def done(result):
+            if getattr(self, "_popup_closed", False):
+                return
             if not isinstance(result, dict) or not result.get("ok"):
                 self._status("Could not load server history")
                 return
@@ -378,26 +383,22 @@ class MainWindow(QMainWindow):
             )
 
             if resume > 0:
-                box = QMessageBox(self)
-                box.setWindowTitle("Resume")
-                box.setText(
-                    f"Resume “{os.path.basename(path)}” "
-                    f"from {fmt_time(resume)}?")
-                button = box.addButton(
-                    "Resume", QMessageBox.AcceptRole)
-                box.addButton(
-                    "Start over", QMessageBox.RejectRole)
-                box.exec()
-                if box.clickedButton() is not button:
-                    resume = 0
-
-            self.remote_controller.cast(path, resume)
+                self._offer_resume(path, resume, self.remote_controller.cast)
+            else:
+                self.remote_controller.cast(path, 0)
 
         run_async(self.remote_controller.client.history, done)
 
     def _remote_continue(self):
         """Show Continue Watching from the server's playback history."""
+        if getattr(self, "_continue_loading", False):
+            return
+        self._continue_loading = True
+
         def done(result):
+            self._continue_loading = False
+            if getattr(self, "_popup_closed", False):
+                return
             if not isinstance(result, dict) or not result.get("ok"):
                 self._status("Could not load server history")
                 return
@@ -444,12 +445,12 @@ class MainWindow(QMainWindow):
                     lst.takeItem(lst.row(lst.currentItem()))
 
             def clear():
-                if QMessageBox.question(
-                    dlg, "Clear server history",
-                    "Forget all Continue Watching entries on the server?"
-                ) == QMessageBox.Yes:
+                def confirmed():
                     self.remote_controller.clear_history()
                     dlg.accept()
+
+                confirm(dlg, "Clear server history",
+                        "Forget all Continue Watching entries on the server?", confirmed)
 
             lst.itemDoubleClicked.connect(lambda _: resume())
             buttons = QHBoxLayout()
@@ -472,7 +473,7 @@ class MainWindow(QMainWindow):
             close = QDialogButtonBox(QDialogButtonBox.Close)
             close.rejected.connect(dlg.reject)
             layout.addWidget(close)
-            dlg.exec()
+            self._show_continue_dialog(dlg)
 
         run_async(self.remote_controller.client.history, done)
 
@@ -492,7 +493,7 @@ class MainWindow(QMainWindow):
                 self.remote_controller.select_audio(i))
 
         if not menu.isEmpty():
-            menu.exec(self.b_audio.mapToGlobal(
+            popup_menu(menu, self.b_audio.mapToGlobal(
                 self.b_audio.rect().bottomLeft()))
 
     def _remote_subs_menu(self):
@@ -516,7 +517,7 @@ class MainWindow(QMainWindow):
                 lambda _=False, i=index:
                 self.remote_controller.select_subtitle(i))
 
-        menu.exec(self.b_subs.mapToGlobal(
+        popup_menu(menu, self.b_subs.mapToGlobal(
             self.b_subs.rect().bottomLeft()))
 
     def _remote_chapters_menu(self):
@@ -533,7 +534,7 @@ class MainWindow(QMainWindow):
                 self.remote_controller.jump_to(seconds))
 
         if not menu.isEmpty():
-            menu.exec(self.b_chapters.mapToGlobal(
+            popup_menu(menu, self.b_chapters.mapToGlobal(
                 self.b_chapters.rect().bottomLeft()))
 
     def _remote_reveal_folder(self, rel):
@@ -643,18 +644,27 @@ class MainWindow(QMainWindow):
         if self.connected_mode:
             self._remote_play(path)
             return
-        r = history.resume_pos(path)
-        resume = 0
-        if r > 0:
-            box = QMessageBox(self)
-            box.setWindowTitle("Resume")
-            box.setText(f"Resume “{os.path.basename(path)}” from {fmt_time(r)}?")
-            rb = box.addButton("Resume", QMessageBox.AcceptRole)
-            box.addButton("Start over", QMessageBox.RejectRole)
-            box.exec()
-            if box.clickedButton() is rb:
-                resume = r
-        self.engine.cast(path, resume)
+        resume = history.resume_pos(path)
+        if resume > 0:
+            self._offer_resume(path, resume, self.engine.cast)
+        else:
+            self.engine.cast(path, 0)
+
+    def _offer_resume(self, path, position, cast):
+        box = QMessageBox(self)
+        box.setWindowTitle("Resume")
+        box.setText(f"Resume “{os.path.basename(path)}” from {fmt_time(position)}?")
+        resume = box.addButton("Resume", QMessageBox.AcceptRole)
+        start = box.addButton("Start over", QMessageBox.ActionRole)
+        box.addButton(QMessageBox.Cancel)
+
+        def selected(_):
+            if box.clickedButton() is resume:
+                cast(path, position)
+            elif box.clickedButton() is start:
+                cast(path, 0)
+
+        show_dialog(box, selected)
 
     def cast_selected(self):
         if self.connected_mode:
@@ -730,7 +740,7 @@ class MainWindow(QMainWindow):
                     self._status(f"Connected to {name}", 4000)
                     return
                 self._status(f"Couldn't open '{name}': {res}")
-                QMessageBox.warning(self, "SMB", f"Could not open '{name}':\n{res}")
+                message(self, "SMB", f"Could not open '{name}':\n{res}", QMessageBox.Warning)
             run_async(lambda: self._safe_source_path(s), done)
         else:
             self._root_at(s.get("path"))
@@ -836,33 +846,32 @@ class MainWindow(QMainWindow):
         self._render()   # remote gating + TV pill are part of the full render
 
     def open_setup(self):
-        if self.connected_mode:
-            # Appearance is local to this desktop, so it needn't block
-            # the connected main window or start a nested event loop.
-            dlg = getattr(self, "_appearance_dialog", None)
-            if dlg is not None and dlg.isVisible():
-                dlg.raise_()
-                dlg.activateWindow()
-                return
-
-            dlg = SetupDialog(self, appearance_only=True)
-            dlg.setModal(False)
-            self._appearance_dialog = dlg
-            dlg.finished.connect(
-                lambda _result: setattr(self, "_appearance_dialog", None)
-            )
-            dlg.show()
+        attribute = "_appearance_dialog" if self.connected_mode else "_setup_dialog"
+        dlg = getattr(self, attribute, None)
+        if dlg is not None and dlg.isVisible():
+            dlg.raise_()
+            dlg.activateWindow()
             return
+        dlg = SetupDialog(self, appearance_only=self.connected_mode)
+        setattr(self, attribute, dlg)
 
-        dlg = SetupDialog(self)
-        if dlg.exec():
-            config.CFG = load_config()
-            self._reload_sources()
-            self._reload_targets()
-            self._target_changed(self.target_box.currentIndex())
+        def completed(result):
+            setattr(self, attribute, None)
+            if not self.connected_mode and result == QDialog.Accepted:
+                config.CFG = load_config()
+                self._reload_sources()
+                self._reload_targets()
+                self._target_changed(self.target_box.currentIndex())
+
+        show_dialog(dlg, completed)
 
     def show_continue(self):
         """Continue-watching list: resume on the current target, forget, or clear."""
+        dlg = getattr(self, "_continue_dialog", None)
+        if dlg is not None and dlg.isVisible():
+            dlg.raise_()
+            dlg.activateWindow()
+            return
         if self.connected_mode:
             self._remote_continue()
             return
@@ -898,10 +907,11 @@ class MainWindow(QMainWindow):
                 lst.takeItem(lst.row(w))
 
         def clear():
-            if QMessageBox.question(dlg, "Clear history",
-                    "Forget everything in Continue watching?") == QMessageBox.Yes:
+            def confirmed():
                 history.clear()
                 dlg.accept()
+
+            confirm(dlg, "Clear history", "Forget everything in Continue watching?", confirmed)
 
         lst.itemDoubleClicked.connect(lambda _w: resume())
         row = QHBoxLayout()
@@ -915,7 +925,11 @@ class MainWindow(QMainWindow):
         lay.addLayout(row)
         bb = QDialogButtonBox(QDialogButtonBox.Close); bb.rejected.connect(dlg.reject)
         lay.addWidget(bb)
-        dlg.exec()
+        self._show_continue_dialog(dlg)
+
+    def _show_continue_dialog(self, dlg):
+        self._continue_dialog = dlg
+        show_dialog(dlg, lambda _: setattr(self, "_continue_dialog", None))
 
     # Transport / navigation delegate to the engine (remote.py calls these by name).
     def go_next(self):
@@ -953,7 +967,7 @@ class MainWindow(QMainWindow):
                     ("  [file]" if s.get("external") else "")
             act = menu.addAction(("●  " if active else "     ") + s["label"] + extra)
             act.triggered.connect(lambda _=False, sub=s: self.engine.select_sub(sub))
-        menu.exec(self.b_subs.mapToGlobal(self.b_subs.rect().bottomLeft()))
+        popup_menu(menu, self.b_subs.mapToGlobal(self.b_subs.rect().bottomLeft()))
 
     def _audio_menu(self):
         if self.connected_mode:
@@ -969,7 +983,7 @@ class MainWindow(QMainWindow):
             mark = "●  " if t["i"] == cur else "     "
             act = menu.addAction(mark + t["label"])
             act.triggered.connect(lambda _=False, i=t["i"]: self.engine.select_audio(i))
-        menu.exec(self.b_audio.mapToGlobal(self.b_audio.rect().bottomLeft()))
+        popup_menu(menu, self.b_audio.mapToGlobal(self.b_audio.rect().bottomLeft()))
 
     def _chapters_menu(self):
         if self.connected_mode:
@@ -982,7 +996,7 @@ class MainWindow(QMainWindow):
         for c in chaps:
             act = menu.addAction(f"{fmt_time(c['start'])}    {c['title']}")
             act.triggered.connect(lambda _=False, s=c["start"]: self.engine.jump_to(s))
-        menu.exec(self.b_chapters.mapToGlobal(self.b_chapters.rect().bottomLeft()))
+        popup_menu(menu, self.b_chapters.mapToGlobal(self.b_chapters.rect().bottomLeft()))
 
     # Transport buttons (used by remote.py via win._transport(win._t_*)).
     def _t_rewind(self):
@@ -998,6 +1012,7 @@ class MainWindow(QMainWindow):
         return self.engine.stop()
 
     def closeEvent(self, event):
+        dismiss_dialogs(self)
         if self.observer_controller is not None:
             self.observer_controller.close()
         if self.connected_mode:
@@ -1039,8 +1054,13 @@ class MainWindow(QMainWindow):
             f"📱 Phone remote:  http://{local_ip()}:{web.get('port', 8950)}    ·    pair in ⚙ Setup")
 
     def show_pair_qr(self):
-        """Pop a modal QR of the tokenized URL for scan-to-pair (shown only while
+        """Show a QR of the tokenized URL for scan-to-pair (shown only while
         open, so the token isn't left on screen). Falls back to the PIN."""
+        existing = getattr(self, "_pair_dialog", None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
         web = config.CFG.get("web", {})
         ip, port = local_ip(), web.get("port", 8950)
         url = f"http://{ip}:{port}/#t={web.get('token', '')}"
@@ -1057,9 +1077,13 @@ class MainWindow(QMainWindow):
         bb = QDialogButtonBox(QDialogButtonBox.Close)
         bb.rejected.connect(dlg.reject); bb.accepted.connect(dlg.accept)
         lay.addWidget(bb)
-        dlg.exec()
+        self._pair_dialog = dlg
+        show_dialog(dlg, lambda _: setattr(self, "_pair_dialog", None))
 
     def new_pairing(self):
+        dialog = getattr(self, "_pair_dialog", None)
+        if dialog is not None:
+            dialog.reject()
         self.engine.new_pairing()
 
     def web_pair(self, pin):

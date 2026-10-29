@@ -1,9 +1,13 @@
 """Setup wizard and the Add-SMB-share dialog."""
 import os
+from copy import deepcopy
 
 from PySide6.QtWidgets import (QDialog, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-                               QLineEdit, QCheckBox, QFormLayout, QListWidget, QFileDialog,
-                               QMessageBox, QInputDialog, QDialogButtonBox, QTabWidget, QWidget, QComboBox)
+                               QLineEdit, QCheckBox, QFormLayout, QListWidget,
+                               QMessageBox, QDialogButtonBox, QTabWidget, QWidget, QComboBox)
+
+from ..qtpopups import (show_dialog, message, confirm, text_input, item_input,
+                        directory_input, dismiss_dialogs)
 
 from .. import config
 from ..config import save_config
@@ -63,18 +67,17 @@ class SetupDialog(QDialog):
     """Configure media sources and cast/playback targets, saved to config.json."""
     def __init__(self, parent=None, *, appearance_only=False):
         super().__init__(parent)
+        self.finished.connect(lambda _: dismiss_dialogs(self))
         self.appearance_only = appearance_only
         self.win = parent
-        if appearance_only:
-            self.setWindowTitle("viz-gui Appearance")
-        self.setWindowTitle("viz-gui Setup")
+        self.setWindowTitle("viz-gui Appearance" if appearance_only else "viz-gui Setup")
         self.resize(560, 470)
-        self.sources = [dict(s) for s in config.CFG.get("sources", [])]
-        self.targets = [dict(t) for t in config.CFG.get("targets", [])]
+        self.sources = deepcopy(config.CFG.get("sources", []))
+        self.targets = deepcopy(config.CFG.get("targets", []))
         self.web = dict(config.CFG.get("web", {"enabled": True, "port": 8950}))
         root = QVBoxLayout(self)
+        self.setSizeGripEnabled(False)
         if self.appearance_only:
-            self.setSizeGripEnabled(False)
             # Leave room around the bottom-right XWayland window corner.
             root.setContentsMargins(12, 12, 30, 16)
         tabs = QTabWidget(); root.addWidget(tabs, 1)
@@ -232,9 +235,8 @@ class SetupDialog(QDialog):
         super().showEvent(event)
 
         # Some Qt styles enable a resize grip when the dialog is shown.
-        # The appearance-only window doesn't need this corner widget.
-        if self.appearance_only:
-            self.setSizeGripEnabled(False)
+        # Setup and Appearance don't need this corner widget.
+        self.setSizeGripEnabled(False)
 
     def _upd_web(self):
         port = (self.web_port.text().strip() or "8950")
@@ -258,12 +260,14 @@ class SetupDialog(QDialog):
     def _new_pairing(self):
         if not self.win:
             return
-        if QMessageBox.question(self, "New PIN & QR",
-                "Generate a fresh PIN and QR?\n\nThis un-pairs every phone that's "
-                "currently connected — they'll each need to scan or enter the new code "
-                "again.") == QMessageBox.Yes:
+        def regenerate():
             self.win.new_pairing()
             self._refresh_pin()
+
+        confirm(self, "New PIN & QR",
+                "Generate a fresh PIN and QR?\n\nThis un-pairs every phone that's "
+                "currently connected — they'll each need to scan or enter the new code "
+                "again.", regenerate)
 
     def _pair_qr(self):
         if self.win:
@@ -286,31 +290,43 @@ class SetupDialog(QDialog):
                 self.tgt_list.addItem(f"VLC:  {t.get('name','this PC')}")
 
     def _add_source(self):
-        d = QFileDialog.getExistingDirectory(self, "Choose a media folder", os.path.expanduser("~"))
-        if not d:
-            return
-        name, ok = QInputDialog.getText(self, "Source name", "Name:", text=os.path.basename(d) or d)
-        self.sources.append({"name": name if (ok and name) else (os.path.basename(d) or d), "path": d})
-        self._refresh()
+        def folder_selected(folder):
+            default = os.path.basename(folder) or folder
+
+            def named(name):
+                self.sources.append({"name": name or default, "path": folder})
+                self._refresh()
+
+            text_input(self, "Source name", "Name:", named, text=default)
+
+        directory_input(self, folder_selected)
 
     def _add_smb(self):
         dlg = SmbDialog(self)
-        if dlg.exec():
+
+        def accepted(result):
+            if result != QDialog.Accepted:
+                return
             src = dlg.result_source()
             if not src:
-                QMessageBox.information(self, "SMB", "Server and share are required.")
+                message(self, "SMB", "Server and share are required.")
                 return
-            # try connecting now so the user gets immediate feedback
+
+            def save_share():
+                self.sources.append(src)
+                self._refresh()
+
             try:
                 smb_mount(**{k: src["smb"].get(k, "") for k in
                              ("server", "share", "user", "domain", "password")},
                           guest=src["smb"].get("guest", False))
             except Exception as e:
-                if QMessageBox.question(self, "SMB",
-                        f"Couldn't connect now:\n{e}\n\nSave the share anyway?") != QMessageBox.Yes:
-                    return
-            self.sources.append(src)
-            self._refresh()
+                confirm(self, "SMB", f"Couldn't connect now:\n{e}\n\nSave the share anyway?",
+                        save_share)
+                return
+            save_share()
+
+        show_dialog(dlg, accepted)
 
     def _rm_source(self):
         i = self.src_list.currentRow()
@@ -331,6 +347,8 @@ class SetupDialog(QDialog):
         run_async(scan_cast_devices, self._autoscan_done)
 
     def _autoscan_done(self, devs):
+        if getattr(self, "_popup_closed", False):
+            return
         try:
             to_add, msg = discovery_plan(devs, self.targets)
             for d in to_add:
@@ -347,6 +365,8 @@ class SetupDialog(QDialog):
         run_async(scan_cast_devices, self._scan_done)
 
     def _scan_done(self, devs):
+        if getattr(self, "_popup_closed", False):
+            return
         try:
             self.b_scan.setEnabled(True)
             if not isinstance(devs, list):
@@ -355,42 +375,50 @@ class SetupDialog(QDialog):
                 self.tgt_status.setText("No Cast devices found. Is the TV on and on the same Wi-Fi?")
                 return
             names = [f"{d['name']}  ({d['addr']})" for d in devs]
-            choice, ok = QInputDialog.getItem(self, "Cast devices", "Add which device?", names, 0, False)
-            if not (ok and choice):
-                return
-            d = devs[names.index(choice)]
-            added = self._add_device(d)
-            self._refresh()
-            self.tgt_status.setText(f"Added {d['name']}." if added
-                                    else f"{d['name']} is already in your targets.")
+            def selected(choice):
+                d = devs[names.index(choice)]
+                added = self._add_device(d)
+                self._refresh()
+                self.tgt_status.setText(f"Added {d['name']}." if added
+                                       else f"{d['name']} is already in your targets.")
+
+            item_input(self, "Cast devices", "Add which device?", names, selected)
         except RuntimeError:
             pass   # dialog closed mid-scan
 
     def _pair(self):
         i = self.tgt_list.currentRow()
         if not (0 <= i < len(self.targets)) or self.targets[i].get("type") != "cast":
-            QMessageBox.information(self, "Pair", "Select a Cast target first (a SmartCast TV).")
+            message(self, "Pair", "Select a Cast target first (a SmartCast TV).")
             return
-        t = self.targets[i]
-        port, ok = QInputDialog.getText(self, "SmartCast port", "SmartCast API port:", text="7345")
-        if not ok:
-            return
-        try:
-            req_token, challenge = sc_pair_start(t["addr"], port)
-        except Exception as e:
-            QMessageBox.warning(self, "Pair", "Could not start pairing (is it a SmartCast TV?):\n" + str(e))
-            return
-        code, ok = QInputDialog.getText(self, "Pairing code", "Enter the code shown on the TV:")
-        if not (ok and code):
-            return
-        try:
-            tok = sc_pair_finish(t["addr"], port, req_token, code, challenge)
-        except Exception as e:
-            QMessageBox.warning(self, "Pair", "Pairing failed:\n" + str(e))
-            return
-        t["smartcast_host"] = f"{t['addr']}:{port}"; t["auth_token"] = tok
-        QMessageBox.information(self, "Pair", "Paired — remote control enabled for this TV.")
-        self._refresh()
+        target = self.targets[i]
+
+        def port_selected(port):
+            if not any(t is target for t in self.targets):
+                return
+            try:
+                req_token, challenge = sc_pair_start(target["addr"], port)
+            except Exception as e:
+                message(self, "Pair", "Could not start pairing (is it a SmartCast TV?):\n"
+                        + str(e), QMessageBox.Warning)
+                return
+
+            def code_selected(code):
+                if not code or not any(t is target for t in self.targets):
+                    return
+                try:
+                    token = sc_pair_finish(target["addr"], port, req_token, code, challenge)
+                except Exception as e:
+                    message(self, "Pair", "Pairing failed:\n" + str(e), QMessageBox.Warning)
+                    return
+                target["smartcast_host"] = f"{target['addr']}:{port}"
+                target["auth_token"] = token
+                message(self, "Pair", "Paired — remote control enabled for this TV.")
+                self._refresh()
+
+            text_input(self, "Pairing code", "Enter the code shown on the TV:", code_selected)
+
+        text_input(self, "SmartCast port", "SmartCast API port:", port_selected, text="7345")
 
     def _add_vlc(self):
         if not any(x.get("type") == "vlc" for x in self.targets):
@@ -421,7 +449,7 @@ class SetupDialog(QDialog):
         try:
             save_config(config.CFG)
         except Exception as e:
-            QMessageBox.warning(self, "Save", "Could not save config:\n" + str(e))
+            message(self, "Save", "Could not save config:\n" + str(e), QMessageBox.Warning)
             return
         self._save_appearance()
 
@@ -442,9 +470,9 @@ class SetupDialog(QDialog):
         try:
             save_appearance(*new_appearance)
         except Exception as e:
-            QMessageBox.warning(
+            message(
                 self, "Appearance",
-                "Could not save appearance settings:\n" + str(e)
+                "Could not save appearance settings:\n" + str(e), QMessageBox.Warning
             )
             return
 
