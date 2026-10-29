@@ -23,6 +23,7 @@ from ..webremote import start_web_server, web_search
 from .webbridge import WebBridge
 from ..engine import Engine
 from .remote import RemotePanel
+from .remote_tree import RemoteMediaTree
 from .icons import ThemedIconProvider
 from .dialogs import SetupDialog, SmbDialog
 
@@ -149,6 +150,13 @@ class MainWindow(QMainWindow):
         self.browse_stack = QStackedWidget()
         self.browse_stack.addWidget(self.tree)        # index 0: folder tree
         self.browse_stack.addWidget(self.results)     # index 1: search results
+        self.remote_tree = None
+        if self.connected_mode:
+            self.remote_tree = RemoteMediaTree(
+                self.remote_controller.client, self)
+            self.remote_tree.play_requested.connect(self._play)
+            self.remote_tree.error_occurred.connect(self._status)
+            self.browse_stack.addWidget(self.remote_tree)
         bl.addWidget(self.browse_stack)
         if not self.connected_mode:
             self._source_changed(self.source_box.currentIndex())
@@ -236,11 +244,9 @@ class MainWindow(QMainWindow):
 
             # Local filesystem paths are not necessarily server paths.
             # Remote browsing will replace these controls in the next step.
-            self._remote_sub = ""
             self._remote_browse_seq = 0
-            self._remote_entries = []
             self._remote_sources = []
-            self.browse_stack.setCurrentWidget(self.results)
+            self.browse_stack.setCurrentWidget(self.remote_tree)
             self.b_continue.setEnabled(True)
             self.b_setup.setEnabled(False)
             self.web_label.setText("Browsing media on the connected server")
@@ -304,7 +310,8 @@ class MainWindow(QMainWindow):
                     source.get("name", "?"), source)
             self.source_box.blockSignals(False)
             if sources:
-                self._remote_browse("")
+                self.remote_tree.set_source(
+                    self.source_box.currentIndex())
 
         targets = status.get("targets") or []
         names = [t.get("name", "?") for t in targets]
@@ -518,34 +525,20 @@ class MainWindow(QMainWindow):
             menu.exec(self.b_chapters.mapToGlobal(
                 self.b_chapters.rect().bottomLeft()))
 
-    # ---- server-side media browsing ----
-    def _remote_browse(self, sub=""):
-        if not self.connected_mode:
-            return
-        self._remote_sub = sub
+    def _remote_reveal_folder(self, rel):
+        """Reveal a search-result folder in the expandable tree."""
         self._remote_browse_seq += 1
-        seq = self._remote_browse_seq
-        src = self.source_box.currentIndex()
-        self.browse_stack.setCurrentWidget(self.results)
-        self.results.clear()
-        if src < 0:
-            return
-        self.results.addItem("Loading server files…")
-
-        def done(result):
-            if seq != self._remote_browse_seq:
-                return
-            self._remote_fill(result, sub)
-
-        run_async(
-            lambda: self.remote_controller.client.browse(src, sub),
-            done,
-        )
+        self._search_timer.stop()
+        self.search_box.blockSignals(True)
+        self.search_box.clear()
+        self.search_box.blockSignals(False)
+        self.browse_stack.setCurrentWidget(self.remote_tree)
+        self.remote_tree.reveal_folder(rel)
 
     def _remote_search(self):
         query = self.search_box.text().strip()
         if not query:
-            self._remote_browse(self._remote_sub)
+            self.browse_stack.setCurrentWidget(self.remote_tree)
             return
         src = self.source_box.currentIndex()
         if src < 0:
@@ -566,8 +559,10 @@ class MainWindow(QMainWindow):
             done,
         )
 
-    def _remote_fill(self, result, sub):
+    def _remote_fill(self, result, sub=None):
+        """Render server search results in the separate results list."""
         self.results.clear()
+
         if not isinstance(result, dict) or not result.get("ok"):
             message = (
                 result.get("error", "Server unavailable")
@@ -577,26 +572,26 @@ class MainWindow(QMainWindow):
             self.results.addItem(f"⚠ {message}")
             return
 
-        if sub is not None and result.get("up") is not None:
-            up = QListWidgetItem("📁  ..")
-            up.setData(Qt.UserRole, {
-                "up": True, "rel": result["up"], "dir": True,
-            })
-            self.results.addItem(up)
-
         entries = result.get("entries") or []
+
         for entry in entries:
-            label = ("📁  " if entry.get("dir") else "🎬  ")
-            item = QListWidgetItem(label + entry.get("name", "?"))
+            icon = "📁" if entry.get("dir") else "🎬"
+            folder = entry.get("folder") or ""
+            label = f"{icon}  {entry.get('name', '?')}"
+            if folder:
+                label += f"\n      {folder}"
+
+            item = QListWidgetItem(label)
             item.setData(Qt.UserRole, entry)
             self.results.addItem(item)
 
-        if not entries and self.results.count() == 0:
-            self.results.addItem("No media found.")
+        if not entries:
+            self.results.addItem("No matching media found.")
 
         if result.get("truncated"):
             self.results.addItem(
-                "More matches exist — narrow your search.")
+                "More matches exist — narrow your search."
+            )
 
     # ---- status surface + startup health ----
     def _status(self, msg, timeout=6000):
@@ -652,10 +647,18 @@ class MainWindow(QMainWindow):
 
     def cast_selected(self):
         if self.connected_mode:
-            item = self.results.currentItem()
-            entry = item.data(Qt.UserRole) if item else None
-            if isinstance(entry, dict) and not entry.get("dir") and entry.get("path"):
-                self._play(entry["path"])
+            if self.browse_stack.currentWidget() is self.remote_tree:
+                path = self.remote_tree.selected_video()
+            else:
+                item = self.results.currentItem()
+                entry = item.data(Qt.UserRole) if item else None
+                path = (
+                    entry.get("path")
+                    if isinstance(entry, dict) and not entry.get("dir")
+                    else None
+                )
+            if path:
+                self._play(path)
             else:
                 self._status("Select a video file first")
             return
@@ -691,9 +694,16 @@ class MainWindow(QMainWindow):
 
     def _source_changed(self, idx):
         if self.connected_mode:
-            if idx >= 0:
-                self.search_box.clear()
-                self._remote_browse("")
+            if self.remote_tree is None:
+                return
+            self._remote_browse_seq += 1
+            self.search_box.blockSignals(True)
+            self.search_box.clear()
+            self.search_box.blockSignals(False)
+            self._search_timer.stop()
+            self.results.clear()
+            self.remote_tree.set_source(idx)
+            self.browse_stack.setCurrentWidget(self.remote_tree)
             return
         if getattr(self, "search_box", None) and self.search_box.text():
             self.search_box.clear()   # results belong to the old source; back to tree
@@ -723,11 +733,13 @@ class MainWindow(QMainWindow):
     # ---- recursive search within the current source ----
     def _on_search_text(self, text):
         if self.connected_mode:
+            self._remote_browse_seq += 1
+            self._search_timer.stop()
             if text.strip():
+                self.browse_stack.setCurrentWidget(self.results)
                 self._search_timer.start()
             else:
-                self._search_timer.stop()
-                self._remote_browse(self._remote_sub)
+                self.browse_stack.setCurrentWidget(self.remote_tree)
             return
         if text.strip():
             self._search_timer.start()        # debounce; fires _run_search
@@ -781,11 +793,8 @@ class MainWindow(QMainWindow):
             entry = item.data(Qt.UserRole)
             if not isinstance(entry, dict):
                 return
-            if entry.get("up"):
-                self._remote_browse(entry["rel"])
-            elif entry.get("dir"):
-                self.search_box.clear()
-                self._remote_browse(entry["rel"])
+            if entry.get("dir"):
+                self._remote_reveal_folder(entry.get("rel", ""))
             elif entry.get("path"):
                 self._play(entry["path"])
             return
