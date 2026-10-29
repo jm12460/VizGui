@@ -14,8 +14,16 @@ DEST="${VIZGUI_DEST:-$HOME/Projects/vizgui}"
 BIN="$HOME/.local/bin"
 APPS="$HOME/.local/share/applications"
 
+UPDATE_ONLY=0
+case "${1:-}" in
+    "") ;;
+    --update) UPDATE_ONLY=1 ;;
+    *) echo "Usage: bash install.sh [--update]" >&2; exit 2 ;;
+esac
+
 say() { printf '\n\033[1;36m==>\033[0m %s\n' "$*"; }
 
+if [ "$UPDATE_ONLY" -eq 0 ]; then
 say "Installing dependencies (you'll be asked for your password)..."
 if command -v pacman >/dev/null 2>&1; then
     sudo pacman -S --needed --noconfirm \
@@ -58,15 +66,28 @@ else
     echo "    installed to $BIN/go-chromecast"
 fi
 
+fi
+
 say "Getting the app..."
 if [ -d "$DEST/.git" ]; then
-    git -C "$DEST" pull --ff-only || echo "    (couldn't update - using the existing copy)"
+    git -C "$DEST" pull --ff-only || {
+    if [ "$UPDATE_ONLY" -eq 1 ]; then
+        echo "Update failed; desktop integration unchanged." >&2
+        exit 1
+    fi
+    echo "    (couldn't update - using the existing copy)"
+}
 else
     mkdir -p "$(dirname "$DEST")"
+    if [ "$UPDATE_ONLY" -eq 1 ]; then
+        echo "No existing installation at $DEST" >&2
+        exit 1
+    fi
     git clone "$REPO_URL" "$DEST"
 fi
 
 say "Installing the launcher..."
+mkdir -p "$BIN"
 cat > "$BIN/viz-gui" <<LAUNCH
 #!/usr/bin/env python3
 """Launcher for the vizgui package."""
@@ -103,10 +124,20 @@ install -Dm644 "$DEST/vizgui/icon.png" "$ICONS/512x512/apps/vizgui.png"
 
 update-desktop-database "$APPS" 2>/dev/null || true
 
+if command -v kbuildsycoca6 >/dev/null 2>&1; then
+    kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
+elif command -v kbuildsycoca5 >/dev/null 2>&1; then
+    kbuildsycoca5 --noincremental >/dev/null 2>&1 || true
+fi
+
 case ":$PATH:" in
     *":$BIN:"*) ;;
     *) printf '\n\033[1;33mNote:\033[0m add %s to your PATH to run `viz-gui` from a terminal.\n' "$BIN" ;;
 esac
 
-say "Done! Launch 'vizgui' from your app menu, or run: viz-gui"
-echo "    First run seeds your media folders and opens a wizard that finds your TV."
+if [ "$UPDATE_ONLY" -eq 1 ]; then
+    say "VizGui updated. Desktop launcher and icons refreshed."
+else
+    say "Done! Launch 'vizgui' from your app menu, or run: viz-gui"
+    echo "    First run seeds your media folders and opens a wizard that finds your TV."
+fi

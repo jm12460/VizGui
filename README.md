@@ -99,6 +99,20 @@ On **Fedora**, VLC and the full ffmpeg build live in [RPM Fusion](https://rpmfus
 (the installer notes this); enable it and `sudo dnf install vlc ffmpeg` for the VLC
 target and all codecs.
 
+### Updating an existing installation
+
+If VizGui was installed using `install.sh`, update it with:
+
+    bash ~/Projects/vizgui/install.sh --update
+
+This updates the source checkout and refreshes the desktop launcher, PNG
+icons, and KDE application cache when available. It skips dependency
+installation and does not restart the headless server.
+
+A plain `git pull` only updates the source files; it does not refresh the
+installed desktop integration. If using a custom installation directory,
+set `VIZGUI_DEST` to the existing checkout path.
+
 ### Other distros / manual
 Install `python3`, `PySide6`, `ffmpeg`, `vlc`, `playerctl`, `gvfs` (SMB backend),
 plus the [`go-chromecast`](https://github.com/vishen/go-chromecast) binary on your
