@@ -86,6 +86,11 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
 #anbtn.ac{background:var(--ac);border-color:#5a8dff;color:#fff}
 #devs button{display:block;width:100%;text-align:left;padding:13px;margin-top:8px}
 #setclose{margin-top:6px;padding:14px}
+#recovery{z-index:30;background:rgba(0,0,0,.8);align-items:center;justify-content:center}
+#recovery .recovery-card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:20px;width:min(100%,400px)}
+#recovery p{color:var(--dim);overflow-wrap:anywhere}
+#recovery .recovery-actions{display:flex;gap:10px}
+#recovery .recovery-actions button{flex:1;padding:12px}
 </style></head><body>
 
 <div id="login" class="overlay"><div style="margin:auto;text-align:center">
@@ -95,7 +100,16 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
  <div><button class="ac" onclick="pair()">Connect</button></div><div id="pinmsg"></div>
 </div></div>
 
+<div id="recovery" class="overlay" role="dialog" aria-modal="true" aria-labelledby="recovery-heading">
+ <div class="recovery-card"><h2 id="recovery-heading">Resume interrupted playback?</h2>
+  <p id="recovery-detail"></p>
+  <div class="recovery-actions"><button onclick="dismissRecovery()">Not now</button>
+   <button class="ac" onclick="resumeRecovery()">Resume</button></div>
+ </div>
+</div>
+
 <div id="topbar">
+ <div id="recovery-error" class="msg" role="status"></div>
  <header><div class="t">viz remote</div>
   <select id="target" onchange="setTarget(this.value)"></select>
   <button id="cont" onclick="openContinue()" title="Continue watching">Continue</button>
@@ -200,6 +214,7 @@ nav .ico{display:block;font-size:19px;margin-bottom:2px}
 <script>
 let curSrc=0, curSub="", anState=true, lastTargets=null, lastSources=null, CHAPTERS=[], AUDIO={tracks:[],current:null}, SUBS={tracks:[],current:null};
 let searchT=null, searchSeq=0;
+let recoveryContext=null, recoverySeen=new Set(), pollSeq=0;
 const I_PLAY='M8 5v14l11-7z', I_PAUSE='M6 5h4v14H6zm8 0h4v14h-4z';
 if(location.hash.indexOf('t=')>=0){try{localStorage.setItem('viztoken',decodeURIComponent(location.hash.split('t=')[1]));history.replaceState(null,'',location.pathname);}catch(e){}}
 let TOKEN=localStorage.getItem('viztoken')||'';
@@ -227,7 +242,30 @@ function tr(a){cmd({kind:'transport',action:a});}
 function setTarget(i){cmd({kind:'target',index:+i});}
 function tab(n){for(const v of ['remote','browse']){$('v-'+v).classList.toggle('on',v===n);$('t-'+v).classList.toggle('on',v===n);}if(n==='browse')loadSources();}
 function fmt(s){s=Math.max(0,s|0);let h=s/3600|0,m=(s%3600)/60|0,x=s%60;return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0');}
-async function poll(){const d=await api('/api/status');if(!d.ok)return;
+function syncRecovery(d){
+ const e=d&&d.interrupted, s=d&&d.server;
+ const valid=d&&d.ok&&e&&typeof e.id==='string'&&e.id&&Number.isSafeInteger(e.pos)&&e.pos>0&&
+  s&&typeof s.id==='string'&&s.id&&typeof s.instance_id==='string'&&s.instance_id&&Number.isInteger(d.target_index);
+ const context=valid?{id:e.id,target_index:d.target_index,server:s.id,instance:s.instance_id}:null;
+ const key=context?JSON.stringify([context.server,context.id]):null;
+ if(!context||recoverySeen.has(key)){recoveryContext=null;$('recovery').classList.remove('on');return;}
+ recoveryContext=context;
+ $('recovery-detail').textContent=(e.title||'Interrupted media')+' · '+fmt(e.pos);
+ $('recovery').classList.add('on');
+}
+async function chooseRecovery(kind){const context=recoveryContext;if(!context)return;
+ recoverySeen.add(JSON.stringify([context.server,context.id]));
+ recoveryContext=null;$('recovery').classList.remove('on');
+ $('recovery-error').textContent='';
+ const result=await api('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json',
+  'X-Viz-Server-Id':context.server,'X-Viz-Instance-Id':context.instance},
+  body:JSON.stringify({kind:kind,id:context.id,target_index:context.target_index})});
+ if(!result.ok){$('recovery-error').textContent=result.error||'Could not confirm your choice. Check playback status before trying again.';}
+}
+function dismissRecovery(){return chooseRecovery('dismiss_interrupted');}
+function resumeRecovery(){return chooseRecovery('resume_interrupted');}
+async function poll(){const seq=++pollSeq,d=await api('/api/status');if(seq!==pollSeq)return;
+ syncRecovery(d);if(!d.ok)return;
  const tsel=$('target'),ts=JSON.stringify(d.targets);
  if(ts!==lastTargets){lastTargets=ts;tsel.replaceChildren(...d.targets.map(t=>opt(t.i,t.name)));}
  tsel.value=d.target_index;

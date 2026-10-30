@@ -135,14 +135,25 @@ class Engine:
         return self.target
 
     # ---- continue-watching + cast recovery ----
+    def playback_position(self):
+        """Return the episode position, not the elapsed time of a live stream."""
+        base = self._resume_base if self.now_live and not self._cast_observer() else 0
+        return self._np_pos + base
+
     def remember(self):
         """Record where the current file stopped. For a live stream the reported
         pos is relative to the resume point, so add the base."""
         if self._cast_observer():
             return
-        if self._now_path and (self._np_dur > 0 or self.now_live):
+        # Some receivers report position before duration. A known position is
+        # sufficient for history, which supports an unknown duration (zero).
+        if self._now_path and (self._np_dur > 0 or self.now_live or self._np_pos > 0):
             base = self._resume_base if self.now_live else 0
-            history.record(self._now_path, self._np_pos + base, self._np_dur,
+            # A transcoded stream's duration can describe only the portion
+            # after the seek, while its saved position is an absolute offset.
+            # Those values must not be used together to decide it finished.
+            duration = 0 if self.now_live else self._np_dur
+            history.record(self._now_path, self._np_pos + base, duration,
                            self.now_title or "")
             self._last_save = time.time()
 
@@ -211,6 +222,8 @@ class Engine:
         self._playback_request["state"] = "starting"
         self._receiver_idle = False
         self._np_pos = 0
+        self._np_dur = 0
+        self.now_live = False
         self._np_playing = False
         self._media = {"audio": [], "subs": [], "chapters": []}
         self._changed()                  # render "Preparing…", disable cast, hide tracks
@@ -362,6 +375,10 @@ class Engine:
         if self._observer_blocked():
             return
         """Run a transport action off-thread, then poll to refresh state."""
+        if self.now_live and self._now_path and fn in (self.rewind, self.forward):
+            offset = -30 if fn == self.rewind else 30
+            self.jump_to(max(0, self._resume_base + self._np_pos + offset))
+            return
         self._run(fn, lambda _: self.poll_cast())
 
     def send_key(self, cmd):
@@ -605,7 +622,7 @@ class Engine:
                             if self.target == "cast" and self._receiver_idle
                             and not self._casting and not self._cast_observer() else None),
             "tv": self._tv_text if config.HOST else "",
-            "now": {"title": self.now_title or "", "pos": self._np_pos,
+            "now": {"title": self.now_title or "", "pos": self.playback_position(),
                     "dur": self._np_dur, "state": self._np_state, "live": self.now_live},
             "chapters": self._media.get("chapters", []),
             "audio": {"tracks": self._media.get("audio", []), "current": self._audio},
@@ -639,6 +656,8 @@ class Engine:
         """Apply a remote action on the GUI thread or headless owner queue."""
         if kind == "resume_interrupted":
             return self.resume_interrupted(p.get("id"), p.get("target_index"))
+        if kind == "dismiss_interrupted":
+            return self.dismiss_interrupted(p.get("id"), p.get("target_index"))
         if self.playback_role == "observer" and kind in ("forget", "clear"):
             return
         try:
@@ -693,14 +712,27 @@ class Engine:
         except Exception as e:
             log.warning("web action %s failed: %s", kind, e)
 
-    def resume_interrupted(self, checkpoint_id, target_index):
-        """Validate a user-confirmed checkpoint on the playback owner thread."""
+    def _valid_interrupted_choice(self, checkpoint_id, target_index):
         entry = self._interrupted_playback
-        if (self.playback_role != "owner" or self.target != "cast"
+        return not (self.playback_role != "owner" or self.target != "cast"
                 or not self._receiver_idle or self._casting
                 or not entry or checkpoint_id != entry["id"]
-                or type(target_index) is not int or target_index != self.target_index):
+                or type(target_index) is not int or target_index != self.target_index)
+
+    def dismiss_interrupted(self, checkpoint_id, target_index):
+        """Dismiss the shared offer without changing playback or watch history."""
+        if not self._valid_interrupted_choice(checkpoint_id, target_index):
             return {"ok": False, "error": "Interrupted playback is no longer available"}
+        self._interrupted_playback = None
+        history.clear_interrupted()
+        self._changed()
+        return {"ok": True}
+
+    def resume_interrupted(self, checkpoint_id, target_index):
+        """Validate a user-confirmed checkpoint on the playback owner thread."""
+        if not self._valid_interrupted_choice(checkpoint_id, target_index):
+            return {"ok": False, "error": "Interrupted playback is no longer available"}
+        entry = self._interrupted_playback
         if not web_path_ok(entry["path"]):
             return {"ok": False, "error": "Interrupted media is missing or outside configured sources"}
         if not self.cast(entry["path"], entry["pos"]):

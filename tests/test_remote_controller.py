@@ -46,6 +46,7 @@ def test_disconnect_preserves_snapshot_and_reconnects(controller):
         remote.refresh()
         deliver(pending, {"error": "offline"})
     assert remote.timer.interval() == remote.MAX_RETRY_INTERVAL
+    assert remote.MAX_RETRY_INTERVAL <= 5000
     fresh = {"ok": True, "now": {"title": "Movie", "pos": 80}}
     remote.refresh()
     deliver(pending, fresh)

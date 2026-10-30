@@ -10,7 +10,7 @@ from .qtasync import run_async
 
 class RemoteController(QObject):
     POLL_INTERVAL = 2000
-    MAX_RETRY_INTERVAL = 30000
+    MAX_RETRY_INTERVAL = 5000
     status_changed = Signal(dict)
     connection_changed = Signal(bool)
     error = Signal(str)
@@ -160,6 +160,9 @@ class RemoteController(QObject):
 
     def resume_interrupted(self, checkpoint_id, target_index):
         self.command("resume_interrupted", id=checkpoint_id, target_index=target_index)
+
+    def dismiss_interrupted(self, checkpoint_id, target_index):
+        self.command("dismiss_interrupted", id=checkpoint_id, target_index=target_index)
 
     def set_autonext(self, enabled):
         self.command("autonext", on=bool(enabled))

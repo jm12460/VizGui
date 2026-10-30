@@ -322,13 +322,15 @@ class MainWindow(QMainWindow):
             return
         self._interrupted_context = context
         dialog = QMessageBox(self)
+        dialog.setAttribute(Qt.WA_ShowWithoutActivating)
         dialog.setWindowTitle("Resume interrupted playback")
         dialog.setTextFormat(Qt.PlainText)
         title = entry.get("title") or "the interrupted episode"
         dialog.setText(f"Playback was interrupted. Resume {title} from "
                        f"{fmt_time(entry['pos'])} on the current Cast target?")
         resume = dialog.addButton("Resume", QMessageBox.AcceptRole)
-        dialog.addButton("Not now", QMessageBox.RejectRole)
+        not_now = dialog.addButton("Not now", QMessageBox.RejectRole)
+        dialog.setDefaultButton(not_now)
         self._interrupted_dialog = dialog
 
         def selected(_):
@@ -338,6 +340,8 @@ class MainWindow(QMainWindow):
             self._interrupted_seen = key
             if dialog.clickedButton() is resume:
                 self.remote_controller.resume_interrupted(entry["id"], status.get("target_index"))
+            else:
+                self.remote_controller.dismiss_interrupted(entry["id"], status.get("target_index"))
 
         show_dialog(dialog, selected)
 
@@ -1293,7 +1297,7 @@ class MainWindow(QMainWindow):
 
     def _render_np(self):
         e = self.engine
-        pos, dur, state = e._np_pos, e._np_dur, e._np_state
+        pos, dur, state = e.playback_position(), e._np_dur, e._np_state
         self.np_badge.setVisible(e.now_live)
         if e.now_live:
             self.np_bar.setRange(0, 0)   # live: no real duration/seek

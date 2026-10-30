@@ -142,6 +142,8 @@ def test_interrupted_playback_is_nonmodal_and_needs_explicit_resume(window, choi
     assert dialog.isVisible()
     assert not dialog.isModal()
     assert not dialog.isSizeGripEnabled()
+    assert dialog.testAttribute(Qt.WA_ShowWithoutActivating)
+    assert dialog.defaultButton().text() == "Not now"
     assert "7:00" in dialog.text()
     win.remote_controller.resume_interrupted.assert_not_called()
     win._offer_interrupted_playback(state)
@@ -152,8 +154,10 @@ def test_interrupted_playback_is_nonmodal_and_needs_explicit_resume(window, choi
         next(b for b in dialog.buttons() if b.text() == choice).click()
     if choice == "Resume":
         win.remote_controller.resume_interrupted.assert_called_once_with("checkpoint-a", 0)
+        win.remote_controller.dismiss_interrupted.assert_not_called()
     else:
         win.remote_controller.resume_interrupted.assert_not_called()
+        win.remote_controller.dismiss_interrupted.assert_called_once_with("checkpoint-a", 0)
     win._offer_interrupted_playback(state)
     assert win._interrupted_dialog is None  # no repeated prompts on each poll
 
@@ -188,6 +192,7 @@ def test_disconnect_closes_interruption_prompt_without_command(window):
     assert not dialog.isVisible()
     assert win._interrupted_dialog is None
     win.remote_controller.resume_interrupted.assert_not_called()
+    win.remote_controller.dismiss_interrupted.assert_not_called()
 
 
 def test_disconnect_does_not_count_as_user_dismissing_checkpoint(window):

@@ -412,6 +412,51 @@ def test_stale_checkpoint_is_rejected_by_http_without_device_io(session, tmp_pat
     assert session.second.connection_status()["interrupted"] == checkpoint
 
 
+@pytest.mark.parametrize("first_choice", ["dismiss_interrupted", "resume_interrupted"])
+def test_recovery_choice_propagates_to_phone_and_desktops(session, tmp_path, first_choice):
+    path, checkpoint = prepare_interrupted_session(session, tmp_path)
+    identity = session.first.connection_status()["server"]
+    payload = {"id": checkpoint["id"], "target_index": 0}
+    assert session.phone()["interrupted"] == checkpoint
+    assert session.first.command_for_server(identity, first_choice, **payload)["ok"]
+    assert session.second.connection_status()["interrupted"] is None
+    assert session.phone()["interrupted"] is None
+    other = "resume_interrupted" if first_choice == "dismiss_interrupted" else "dismiss_interrupted"
+    with pytest.raises(ServerConnectionError):
+        session.second.command_for_server(identity, other, **payload)
+    if first_choice == "dismiss_interrupted":
+        assert session.device.operations == []
+        assert str(path) in history.load()
+    else:
+        wait_for(session.first, pos=120)
+        assert session.device.operations == [("start", str(path), 120)]
+
+
+def test_simultaneous_resume_and_dismiss_have_one_winner(session, tmp_path):
+    path, checkpoint = prepare_interrupted_session(session, tmp_path)
+    identity = session.first.connection_status()["server"]
+    barrier = threading.Barrier(2)
+
+    def choose(client, kind):
+        barrier.wait(timeout=3)
+        try:
+            return kind, client.command_for_server(identity, kind, id=checkpoint["id"], target_index=0)["ok"]
+        except ServerConnectionError:
+            return kind, False
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(choose, session.first, "resume_interrupted"),
+                   pool.submit(choose, session.second, "dismiss_interrupted")]
+        results = dict(f.result(timeout=5) for f in futures)
+    assert sum(results.values()) == 1
+    assert session.phone()["interrupted"] is None
+    if results["resume_interrupted"]:
+        wait_for(session.first, pos=120)
+        assert session.device.operations == [("start", str(path), 120)]
+    else:
+        assert session.device.operations == []
+
+
 def wait_for_request(client, state):
     deadline = time.monotonic() + 3
     while True:

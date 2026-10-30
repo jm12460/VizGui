@@ -121,6 +121,25 @@ def test_another_client_starting_playback_invalidates_offer(recovery):
     assert len(pending) == 2
 
 
+def test_dismiss_is_shared_and_keeps_continue_watching(recovery):
+    e, media, pending = recovery
+    entry = idle(e)
+    assert not e.dismiss_interrupted("stale", 0)["ok"]
+    assert not e.dismiss_interrupted(entry["id"], 1)["ok"]
+    assert e.web_status()["interrupted"] == entry
+    assert e.web_do("dismiss_interrupted", {"id": entry["id"], "target_index": 0})["ok"]
+    assert e.web_status()["interrupted"] is None
+    assert history.interrupted() is None
+    assert str(media) in history.load()
+    assert not e.resume_interrupted(entry["id"], 0)["ok"]
+    assert not e.dismiss_interrupted(entry["id"], 0)["ok"]
+    assert pending == []
+    e.active.start.assert_not_called()
+    fresh = engine.Engine(run_async=Mock())
+    fresh.target_index = 0
+    assert idle(fresh) is None
+
+
 def test_failed_resume_preserves_checkpoint_and_can_be_retried(recovery):
     e, _, pending = recovery
     entry = idle(e)
@@ -209,3 +228,76 @@ def test_status_failure_hides_offer_until_receiver_idle_is_confirmed(recovery):
     assert e.web_status()["interrupted"] is None
     assert e.resume_interrupted(entry["id"], 0)["ok"] is False
     assert idle(e) == entry
+
+
+def test_interruption_preserves_known_position_when_duration_is_unknown(recovery):
+    e, media, _ = recovery
+    # A receiver can report a position before it reports the media duration.
+    e._now_path = str(media)
+    e.now_title = "Episode"
+    e.now_live = False
+    e._np_pos = 30
+    e._np_dur = 0
+    e.shutdown()
+    fresh = engine.Engine(run_async=Mock())
+    fresh.target_index = 0
+    entry = idle(fresh)
+    assert entry is not None
+    assert entry["path"] == str(media)
+    assert entry["pos"] == 30
+
+
+def test_resumed_transcode_does_not_use_stream_duration_to_discard_history(recovery):
+    e, media, pending = recovery
+    entry = idle(e)
+    assert e.resume_interrupted(entry["id"], 0)["ok"]
+    fn, done = pending.pop(0)
+    done(fn())
+    e._poll_done({"idle": False, "state": "PLAYING", "pos": 60,
+                  "dur": 100, "live": True})
+    e.shutdown()
+    assert history.resume_pos(str(media)) == 480
+    fresh = engine.Engine(run_async=Mock())
+    fresh.target_index = 0
+    assert idle(fresh)["pos"] == 480
+
+
+def test_new_launch_does_not_save_stale_duration_with_zero_position(recovery):
+    e, media, _ = recovery
+    entry = idle(e)
+    e._np_dur = 1200
+    assert e.resume_interrupted(entry["id"], 0)["ok"]
+    e.shutdown()
+    assert history.resume_pos(str(media)) == 420
+
+
+@pytest.mark.parametrize("action,base,position,expected", [("forward", 420, 12, 462),
+                                                            ("rewind", 420, 12, 402),
+                                                            ("rewind", 10, 2, 0)])
+def test_live_relative_transport_recasts_at_absolute_position(recovery, action, base, position, expected):
+    e, media, pending = recovery
+    e._now_path = str(media)
+    e._resume_base = base
+    e._np_pos = position
+    e.now_live = True
+    e._audio = 2
+    e._sub = {"i": 3}
+    e.cast = Mock()
+    e.transport(getattr(e, action))
+    e.cast.assert_called_once_with(str(media), expected, audio=2, sub={"i": 3})
+    e.active.seek.assert_not_called()
+    assert pending == []
+
+
+def test_live_status_reports_absolute_episode_position(recovery):
+    e, _, _ = recovery
+    e._resume_base = 420
+    e._np_pos = 12
+    e.now_live = True
+    assert e.playback_position() == 432
+    assert e.web_status()["now"]["pos"] == 432
+    e.now_live = False
+    assert e.web_status()["now"]["pos"] == 12
+    e.playback_role = "observer"
+    e.now_live = True
+    assert e.playback_position() == 12

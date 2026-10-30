@@ -7,6 +7,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- The phone remote offers explicit interrupted Cast playback recovery, with
+  server-instance and target checks; dismissing the prompt leaves playback idle.
+- Recovery choices are shared across desktops and phones, so a dismissal or
+  accepted resume closes other clients' prompts and stale choices are rejected.
 - The connected server-folder dialog opens wider and includes a non-modal folder
   picker alongside the editable path field; the server still validates the path.
 - Connected desktops on the server computer can add local and SMB sources or
@@ -30,6 +34,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   disconnect/reconnect behavior, and client shutdown safety.
 
 ### Fixed
+- Limit desktop reconnect retries to five seconds and show recovery prompts
+  without requesting focus, with Not now as the safe default action.
+- Show the episode's absolute position after seeking or resuming a live Cast
+  stream, instead of resetting the displayed timer to the stream's start.
+- Forward and rewind on remuxed or transcoded Cast playback reopen the stream
+  at the requested absolute position rather than seeking within a live stream.
+- Preserve resumed transcoded playback in history when the receiver reports a
+  stream-relative duration, and discard stale duration when launching a file.
+- Preserve a known playback position on shutdown even if the receiver has not
+  reported the duration yet, so it remains available for interrupted recovery.
 - Configuration saves create private, uniquely named temporary files before
   atomically replacing the configuration, protecting SMB credentials during saves.
 - Superseded launch callbacks, queued launches after cancellation, and stale
