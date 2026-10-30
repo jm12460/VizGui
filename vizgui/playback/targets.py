@@ -166,11 +166,14 @@ class VlcTarget(PlaybackTarget):
             # honors the selection instead of ignoring it (the launch path applies
             # the same options via --audio-track/--sub-file/--sub-track).
             play = "in_play&input=" + urllib.parse.quote(items[0])
-            for opt in self._item_opts(audio, sub):
+            # Override a global start-time left by older VizGui launches (or
+            # VLC preferences). Seek only the current item to its saved offset.
+            for opt in [":start-time=0", *self._item_opts(audio, sub)]:
                 play += "&option=" + urllib.parse.quote(opt)
             vlc_cmd(play)
             for it in items[1:]:
-                vlc_cmd("in_enqueue&input=" + urllib.parse.quote(it))
+                vlc_cmd("in_enqueue&input=" + urllib.parse.quote(it)
+                        + "&option=" + urllib.parse.quote(":start-time=0"))
             if resume:
                 time.sleep(1)                       # let the item load before seeking
                 vlc_cmd(f"seek&val={int(resume)}")
@@ -189,7 +192,13 @@ class VlcTarget(PlaybackTarget):
             return "playing"
         # 3) No VLC -> launch our own (HTTP), stays open, native playlist.
         self.mode = "http"
-        start_arg = [f"--start-time={int(resume)}"] if resume else []
+        start_arg = ["--start-time=0"]
+        # A global nonzero --start-time is inherited by every playlist entry.
+        # VLC's :option syntax applies only to the immediately preceding input.
+        playlist = [items[0]]
+        if resume:
+            playlist.append(f":start-time={int(resume)}")
+        playlist.extend(items[1:])
         if audio is not None:
             start_arg.append(f"--audio-track={int(audio)}")
         if sub:
@@ -204,7 +213,7 @@ class VlcTarget(PlaybackTarget):
              # otherwise forward our files to a lingering instance and exit without
              # opening a window — so casts silently stop working after a while.
              "--no-one-instance", "--no-random", "--no-loop", "--no-repeat",
-             *start_arg, *items],
+             *start_arg, *playlist],
             log_path=CASTER_LOG)
         for _ in range(20):
             time.sleep(0.5)

@@ -7,6 +7,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- Resuming an episode in VLC no longer applies its saved timestamp to later
+  playlist entries. Queued episodes start at zero, including when reusing a VLC
+  instance launched with the old global resume option.
 - Disabled the bottom-right Qt resize grip across all shared popup dialogs,
   including after showing them, matching the Appearance window fix.
 - Setup, pairing, resume, confirmation, input, and error dialogs now use

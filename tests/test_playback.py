@@ -136,7 +136,8 @@ def test_vlc_launch_includes_start_time_on_resume():
          mock.patch.object(targets.time, "sleep", lambda *a: None):
         res = t.start("/m/x.mkv", ["/m/x.mkv"], False, resume=300)
     assert res == "playing"
-    assert "--start-time=300" in captured["args"]
+    assert "--start-time=300" not in captured["args"]
+    assert captured["args"][-2:] == ["/m/x.mkv", ":start-time=300"]
 
 
 def test_cast_audio_forces_remux_on_direct():
