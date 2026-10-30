@@ -40,6 +40,7 @@ def test_parse_status_playing():
     assert d["state"] == "PAUSED"
     assert d["pos"] == 31 and d["dur"] == 1298
     assert d["file"] == "Show.S01E02.mp4"
+    assert d["content_id"] == "http://x?media_file=/p/Show.S01E02.mp4&live_streaming=false"
 
 
 def test_parse_status_idle():

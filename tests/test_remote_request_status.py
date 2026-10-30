@@ -7,7 +7,7 @@ import subprocess
 import pytest
 
 
-@pytest.mark.parametrize("state", ["starting", "failed", "playing"])
+@pytest.mark.parametrize("state", ["starting", "failed", "playing", "unreachable"])
 def test_phone_renders_playback_request_result_as_text(state):
     node = shutil.which("node")
     if node is None:
@@ -19,6 +19,8 @@ def test_phone_renders_playback_request_result_as_text(state):
               "now": {"title": "Episode", "pos": 60, "dur": 600, "state": "PLAYING"},
               "playback_request": {"id": "test-request", "state": state,
                                    "title": "New episode", "error": "<b>device failed</b>"}}
+    if state == "unreachable":
+        status["receiver_unreachable"] = True
     script = """
 const nodes={};
 function $(id){return nodes[id]||(nodes[id]={style:{},textContent:'',value:'',
@@ -42,6 +44,8 @@ poll().then(()=>process.stdout.write(JSON.stringify({
     elif state == "failed":
         assert rendered["title"] == "Playback failed: New episode"
         assert rendered["time"] == "<b>device failed</b>"
+    elif state == "unreachable":
+        assert rendered["time"] == "Cast receiver unreachable · last known position 1:00"
     else:
         assert rendered["title"] == "Episode"
         assert rendered["time"] == "1:00 / 10:00"

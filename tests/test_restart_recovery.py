@@ -89,6 +89,60 @@ def test_restart_recovers_source_and_absolute_position_once(playback):
     assert history.current()["resume_base"] == 720
 
 
+def test_network_recovery_reopens_only_stalled_same_stream_at_receiver_position(playback, monkeypatch):
+    rig = playback.make()
+    e = rig.engine
+    e.cast(playback.path, 600)
+    run_start(rig)
+    rig.pending.clear()
+    state = playback.receiver(720 if playback.plan == "direct" else 120)
+    state["content_id"] = "http://test/owned-stream"
+    e._poll_done(state)
+    e._poll_done({"idle": True, "busy": True, "error": "offline"})
+    clock = [100.0]
+    monkeypatch.setattr(engine.time, "monotonic", lambda: clock[0])
+    buffering = {**state, "state": "BUFFERING", "pos": 750 if playback.plan == "direct" else 150}
+    e._poll_done(buffering)
+    assert rig.pending == []
+    clock[0] += e.NETWORK_RECOVERY_WAIT
+    e._poll_done(buffering)
+    assert e._resume_base == 750
+    assert e._casting
+    assert len(rig.pending) == 2
+    e._poll_done(buffering)
+    assert len(rig.pending) == 2
+
+
+@pytest.mark.parametrize("change", ["paused_before", "paused_after", "other_content", "missing_position", "playing_again", "user_action"])
+def test_network_recovery_never_restarts_unconfirmed_or_changed_session(playback, monkeypatch, change):
+    rig = playback.make()
+    e = rig.engine
+    e.cast(playback.path, 600)
+    run_start(rig)
+    rig.pending.clear()
+    state = {**playback.receiver(720 if playback.plan == "direct" else 120),
+             "content_id": "http://test/owned-stream"}
+    e._poll_done(state)
+    if change == "paused_before":
+        e._poll_done({**state, "state": "PAUSED"})
+    e._poll_done({"idle": True, "busy": True, "error": "offline"})
+    if change == "user_action":
+        e.transport(e.playpause)
+        rig.pending.clear()
+    clock = [100.0]
+    monkeypatch.setattr(engine.time, "monotonic", lambda: clock[0])
+    resumed = {**state, "state": "BUFFERING"}
+    if change == "paused_after": resumed["state"] = "PAUSED"
+    if change == "other_content": resumed["content_id"] = "http://other/stream"
+    if change == "missing_position": resumed.pop("pos")
+    if change == "playing_again": resumed["state"] = "PLAYING"
+    e._poll_done(resumed)
+    clock[0] += e.NETWORK_RECOVERY_WAIT + 1
+    e._poll_done(resumed)
+    assert rig.pending == []
+    assert not e._casting
+
+
 def test_second_restart_does_not_double_count_live_resume_base(playback):
     playback.checkpoint()
     fresh = playback.make()

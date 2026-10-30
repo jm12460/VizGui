@@ -435,6 +435,8 @@ class MainWindow(QMainWindow):
             self.np_bar.setRange(0, 1000)
             self.np_bar.setValue(0)
             self.np_time.setText(request.get("error") or "Could not start playback")
+        elif status.get("receiver_unreachable"):
+            self.np_time.setText("Cast receiver unreachable · last known position " + fmt_time(pos))
 
     # ---- connected-mode playback history and track selection ----
     def _remote_play(self, path):
@@ -1280,6 +1282,8 @@ class MainWindow(QMainWindow):
         else:
             self.np_title.setText(e._display_title)
             self._render_np()
+        if e._receiver_unreachable and request.get("state") not in ("accepted", "starting", "failed"):
+            self.np_time.setText("Cast receiver unreachable · last known position " + fmt_time(e.playback_position()))
         # track-selection buttons + cast button + auto-next mirror engine state
         self.b_chapters.setVisible(bool(e._media.get("chapters")))
         self.b_audio.setVisible(len(e._media.get("audio", [])) > 1)

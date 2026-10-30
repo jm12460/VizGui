@@ -74,6 +74,12 @@ def test_removing_last_source_clears_old_playable_paths(window):
     assert win.remote_tree.topLevelItemCount() == 0
 
 
+def test_receiver_outage_is_visible_in_connected_gui(window):
+    win, _ = window
+    win._render_remote({**status([]), "receiver_unreachable": True})
+    win.np_time.setText.assert_called_with("Cast receiver unreachable · last known position 0:30")
+
+
 def test_removing_source_discards_pending_browse_response(window):
     win, pending = window
     win._render_remote(status([{"i": 0, "name": "Media"}]))

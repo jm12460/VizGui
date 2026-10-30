@@ -41,6 +41,7 @@ def run_sync(fn, on_done=None):
 
 class Engine:
     PLAYBACK_CONFIRM_TIMEOUT = 45
+    NETWORK_RECOVERY_WAIT = 10
     def __init__(self, run_async=run_sync, on_change=None, on_status=None,
                  playback_role="owner"):
         if playback_role not in ("owner", "observer"):
@@ -58,6 +59,7 @@ class Engine:
         self.now_live = False            # True while live-transcoding (no seek/dur)
         self._casting = False            # True from request until the launch finishes
         self._playback_request = None
+        self._launch_started_at = None
         self._sources_revision = 0
         self._poll_generation = 0
         self._confirmation_deadline = None
@@ -70,6 +72,11 @@ class Engine:
         self._interruption_checked = False
         self._interrupted_playback = None
         self._receiver_idle = False
+        self._receiver_unreachable = False
+        self._receiver_content_id = None
+        self._receiver_content_conflict = False
+        self._receiver_confirmed_position = None
+        self._network_recovery = None
         # last-known playback, advanced locally once a second between polls
         self._np_pos = 0; self._np_dur = 0; self._np_state = ""; self._np_playing = False
         self._resume_base = 0            # secs a live stream was resumed from
@@ -110,6 +117,11 @@ class Engine:
             self._apply_target(targets[0])
 
     def _apply_target(self, t):
+        self._receiver_unreachable = False
+        self._receiver_content_id = None
+        self._receiver_content_conflict = False
+        self._receiver_confirmed_position = None
+        self._network_recovery = None
         self.target = t.get("type", "cast")
         self.active = self.targets.get(self.target, self.targets["cast"])
         if self.target == "cast":
@@ -192,10 +204,15 @@ class Engine:
     def cast(self, path, resume=0, audio=None, sub=None):
         if self._observer_blocked():
             return False
+        self._network_recovery = None
+        self._receiver_content_id = None
+        self._receiver_content_conflict = False
+        self._receiver_confirmed_position = None
         request_id = secrets.token_hex(8)
         title = os.path.basename(path.rstrip(os.sep)) or path
         self._playback_request = {"id": request_id, "state": "accepted",
                                   "title": title, "error": None, "error_code": None}
+        self._launch_started_at = time.monotonic()
         self._confirmation_deadline = None
         self._poll_generation += 1
         self._casting = False
@@ -240,6 +257,9 @@ class Engine:
         def start():
             if not current():
                 return {"error": "Playback request superseded"}
+            if callable(getattr(type(active), "start_guarded", None)):
+                return active.start_guarded(path, items, self.auto_next, resume, audio, sub,
+                                            current=current)
             return active.start(path, items, self.auto_next, resume, audio, sub)
 
         def done(res):
@@ -375,6 +395,7 @@ class Engine:
         if self._observer_blocked():
             return
         """Run a transport action off-thread, then poll to refresh state."""
+        self._network_recovery = None
         if self.now_live and self._now_path and fn in (self.rewind, self.forward):
             offset = -30 if fn == self.rewind else 30
             self.jump_to(max(0, self._resume_base + self._np_pos + offset))
@@ -446,6 +467,40 @@ class Engine:
     def _poll_done(self, st):
         if not isinstance(st, dict):
             return
+        if self.target == "cast" and st.get("error"):
+            if (not self._receiver_unreachable and not self._cast_observer()
+                    and self._np_state == "PLAYING" and self._now_path
+                    and not self._casting and self._receiver_content_id
+                    and self._receiver_confirmed_position is not None):
+                self._network_recovery = {"content_id": self._receiver_content_id,
+                                          "path": self._now_path,
+                                          "target": self.target_index,
+                                          "generation": self._poll_generation,
+                                          "minimum": self._receiver_confirmed_position,
+                                          "buffering_since": None}
+                log.info("Cast network recovery armed at last confirmed position %ss",
+                         self._receiver_confirmed_position)
+            elif not self._receiver_unreachable and not self._cast_observer():
+                log.info("Cast network recovery not armed: no confirmed playing stream and position")
+            self._receiver_unreachable = True
+            self._receiver_idle = False
+            self._changed()
+            return
+        self._receiver_unreachable = False
+        recovery = self._network_recovery
+        if recovery:
+            if (st.get("idle") or st.get("content_id") != recovery["content_id"]
+                    or self._now_path != recovery["path"]
+                    or self.target_index != recovery["target"]
+                    or self._poll_generation != recovery["generation"]
+                    or st.get("state") != "BUFFERING"):
+                log.info("Cast network recovery cancelled: receiver state=%s, same content=%s, idle=%s",
+                         st.get("state") or "unknown",
+                         st.get("content_id") == recovery["content_id"], bool(st.get("idle")))
+                self._network_recovery = None
+            elif recovery["buffering_since"] is None:
+                recovery["buffering_since"] = time.monotonic()
+                log.info("Cast network recovery waiting for buffering to settle")
         if self._cast_observer():
             idle = bool(st.get("idle"))
             self._now_path = None
@@ -511,12 +566,36 @@ class Engine:
         self._np_dur = st.get("dur", 0)
         self._np_state = st.get("state", "")
         self._np_playing = self._np_state in ("PLAYING", "")
+        if type(st.get("pos")) is int and st["pos"] >= 0:
+            self._receiver_confirmed_position = self.playback_position()
+        if st.get("content_id") and self._np_state == "PLAYING" and not self._receiver_content_conflict:
+            if self._receiver_content_id is None:
+                self._receiver_content_id = st["content_id"]
+            elif self._receiver_content_id != st["content_id"]:
+                # Do not adopt an unrelated receiver session as our own.
+                self._receiver_content_id = None
+                self._receiver_content_conflict = True
+                self._network_recovery = None
+        recovery = self._network_recovery
+        if (recovery and recovery["buffering_since"] is not None
+                and time.monotonic() - recovery["buffering_since"] >= self.NETWORK_RECOVERY_WAIT
+                and type(st.get("pos")) is int and st["pos"] >= 0):
+            position = self.playback_position()
+            self._network_recovery = None
+            if position >= recovery["minimum"]:
+                log.info("Cast network recovery reopening stream at receiver position %ss", position)
+                self.cast(self._now_path, position, audio=self._audio, sub=self._sub)
+                return
+            log.info("Cast network recovery cancelled: receiver position predates last confirmed position")
         if self._np_state == "PLAYING":
             self._saw_playing = True
             if (not self._casting and self._playback_request
                     and (self._playback_request["state"] == "starting"
                          or self._playback_request.get("error_code") == "confirmation_timeout")):
                 self._playback_request.update(state="playing", error=None, error_code=None)
+                if self._launch_started_at is not None:
+                    log.info("Cast playback confirmed %.2fs after request",
+                             time.monotonic() - self._launch_started_at)
                 self._confirmation_deadline = None
                 if self.target == "cast":
                     self._interrupted_playback = None
@@ -550,7 +629,7 @@ class Engine:
                                           error_code="confirmation_timeout")
             self._status(message)
             self._changed()
-        if self._np_playing and (self.now_live or self._np_dur > 0):
+        if not self._receiver_unreachable and self._np_playing and (self.now_live or self._np_dur > 0):
             if not self.now_live and self._np_dur:
                 self._np_pos = min(self._np_pos + 1, self._np_dur)
             else:
@@ -618,6 +697,7 @@ class Engine:
             "sources_revision": self._sources_revision,
             "auto_next": self.auto_next,
             "playback_request": dict(self._playback_request) if self._playback_request else None,
+            "receiver_unreachable": self._receiver_unreachable,
             "interrupted": (self._interrupted_playback
                             if self.target == "cast" and self._receiver_idle
                             and not self._casting and not self._cast_observer() else None),

@@ -191,7 +191,8 @@ def recover_match(media_file, saved, recent, safe=None, exists=os.path.isfile):
     is_pipe = media_file == "pipe_output"
     if saved and exists(saved.get("path", "")):
         sp = saved["path"]
-        if is_pipe or media_file in (os.path.basename(sp), safe(sp)):
+        from .playback.prepared import prepared_name
+        if is_pipe or media_file in (os.path.basename(sp), safe(sp), prepared_name(sp)):
             return {"path": sp, "title": saved.get("title") or os.path.basename(sp),
                     "resume_base": int(saved.get("resume_base", 0)), "reattach": True}
     if not is_pipe:                      # a direct cast we can name from history

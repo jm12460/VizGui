@@ -7,6 +7,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Compatible, bounded H.264/AAC-LC mono or stereo files are prepared as temporary seekable MP4s
+  for direct Cast seeking; other media keeps the existing streaming path.
 - The phone remote offers explicit interrupted Cast playback recovery, with
   server-instance and target checks; dismissing the prompt leaves playback idle.
 - Recovery choices are shared across desktops and phones, so a dismissal or
@@ -34,6 +36,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   disconnect/reconnect behavior, and client shutdown safety.
 
 ### Fixed
+- After a Cast network outage, reopen the same still-buffering stream once at
+  the receiver's reported position, while preserving paused and changed sessions.
+- Freeze the displayed position and show when the Cast receiver is unreachable
+  rather than advancing a stale playback clock during network outages.
 - Limit desktop reconnect retries to five seconds and show recovery prompts
   without requesting focus, with Not now as the safe default action.
 - Show the episode's absolute position after seeking or resuming a live Cast

@@ -284,6 +284,8 @@ async function poll(){const seq=++pollSeq,d=await api('/api/status');if(seq!==po
  }else if(request.state==='failed'){
   $('np').textContent='Playback failed: '+(request.title||'media');
   $('badge').style.display='none';prog.style.width='0';tm.textContent=request.error||'Could not start playback';
+ }else if(d.receiver_unreachable){
+  tm.textContent='Cast receiver unreachable · last known position '+fmt(n.pos||0);
  }
  $('tv').textContent=d.tv||'';
  anState=!!d.auto_next;const an=$('anbtn');an.textContent='Auto-next: '+(anState?'on':'off');an.classList.toggle('ac',anState);

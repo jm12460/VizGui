@@ -18,7 +18,7 @@ from ..transcode import write_wrapper, prepare_subtitle, HAS_HW
 from ..helpers import cast_plan, parse_status
 from ..vlc import (vlc_cmd, vlc_status, vlc_any_status, vlc_playlist_path,
                    mpris_cmd, mpris_running, path_to_uri, VLC_PORT, VLC_PW)
-from . import media
+from . import media, prepared
 from .base import PlaybackTarget
 
 
@@ -28,6 +28,7 @@ class CastTarget(PlaybackTarget):
     def __init__(self):
         self.handle = None
         self.live = False
+        self._prepared = None
 
     def available(self):
         if not platforms.has_tool("go-chromecast", health.GC_FALLBACKS):
@@ -39,6 +40,9 @@ class CastTarget(PlaybackTarget):
         self.handle = None
         if h:
             h.terminate()
+        if self._prepared is not None:
+            self._prepared.cleanup()
+            self._prepared = None
 
     def _wait_idle(self, budget=4.0):
         """Wait (time-budgeted) for the receiver to report idle, so a replacement
@@ -51,26 +55,43 @@ class CastTarget(PlaybackTarget):
             if not line or "Idle" in line or "Backdrop" in line:
                 return
 
-    def start(self, path, items, auto_next, resume=0, audio=None, sub=None):
+    def start_guarded(self, path, items, auto_next, resume=0, audio=None, sub=None, *, current):
+        return self.start(path, items, auto_next, resume, audio, sub, current=current)
+
+    def start(self, path, items, auto_next, resume=0, audio=None, sub=None, *, current=None):
+        started = time.monotonic()
         plan = cast_plan(media.vcodec(path), os.path.splitext(path)[1])
         if sub is not None:
             plan = "transcode"     # burning a subtitle requires re-encoding the video
         elif plan == "direct" and audio is not None:
             plan = "remux"         # selecting a non-default audio needs a re-map
+        ready = None
+        if plan == "remux" and audio is None and sub is None:
+            ready = prepared.prepare(path, CACHE)
+            if ready is not None:
+                plan = "direct"
+        if current is not None and not current():
+            if ready is not None:
+                ready[0].cleanup()
+            return {"error": "Playback request superseded"}
         self.live = plan != "direct"
         if self.live and not platforms.has_tool("ffmpeg"):
             return "ffmpeg isn't installed — can't transcode/remux this file."
         self._kill()
+        self._prepared = ready[0] if ready is not None else None
         gc("stop")                 # end the receiver session cleanly
+        stopped = time.monotonic()
         self._wait_idle()          # let the receiver fully reset before a new
                                    # session, or go-chromecast's app-switch handshake
                                    # times out ("context deadline exceeded") on re-cast
+        idle = time.monotonic()
         base = [GC, "--addr", config.TV_IP, "--port", config.CAST_PORT]
         if plan == "direct":
             # Include the resume offset in LOAD. A separate seek after a fixed
             # delay can race receiver initialization and silently start at zero.
             self.handle = platforms.launch_caster(
-                base + ["load", "--start-time", str(int(resume)), media.symlink_serve(path)],
+                base + ["load", "--start-time", str(int(resume)),
+                        ready[1] if ready is not None else media.symlink_serve(path)],
                 log_path=CASTER_LOG)
             what = "direct"
         else:
@@ -82,6 +103,9 @@ class CastTarget(PlaybackTarget):
                 base + ["transcode", "--content-type", "video/mp4", "--command", wrapper],
                 log_path=CASTER_LOG)
             what = "live remux" if plan == "remux" else f"live transcode ({'hw' if HAS_HW else 'cpu'})"
+        launched = time.monotonic()
+        log.info("Cast launch timing: prepare_stop=%.2fs wait_idle=%.2fs launch=%.2fs",
+                 stopped - started, idle - stopped, launched - idle)
         time.sleep(5)              # let it establish + the TV start
         alive = self.handle.poll() is None
         log.info("caster pid=%s alive=%s (%s) resume=%s", self.handle.pid, alive, what, resume)

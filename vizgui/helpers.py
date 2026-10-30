@@ -71,4 +71,9 @@ def parse_status(line):
     m = re.search(r"media_file=([^&\]]+)", line)
     if m:
         d["file"] = os.path.basename(m.group(1))
+    # Keep the receiver's content identifier internal: it lets the owner
+    # distinguish a reconnect to the same stream from a different Cast session.
+    m = re.search(r"\[(https?://[^\]]+)\]", line)
+    if m:
+        d["content_id"] = m.group(1)
     return d

@@ -230,6 +230,22 @@ def test_status_failure_hides_offer_until_receiver_idle_is_confirmed(recovery):
     assert idle(e) == entry
 
 
+def test_receiver_outage_freezes_clock_without_issuing_playback_commands(recovery):
+    e, _, pending = recovery
+    e._poll_done({"idle": False, "state": "PLAYING", "pos": 80, "dur": 600})
+    e._poll_done({"idle": True, "busy": True, "error": "unreachable"})
+    assert e.web_status()["receiver_unreachable"] is True
+    for _ in range(20):
+        e.tick()
+    assert e.web_status()["now"]["pos"] == 80
+    assert pending == []
+    e.active.start.assert_not_called()
+    e._poll_done({"idle": False, "state": "PLAYING", "pos": 82, "dur": 600})
+    assert e.web_status()["receiver_unreachable"] is False
+    e.tick()
+    assert e.web_status()["now"]["pos"] == 83
+
+
 def test_interruption_preserves_known_position_when_duration_is_unknown(recovery):
     e, media, _ = recovery
     # A receiver can report a position before it reports the media duration.
