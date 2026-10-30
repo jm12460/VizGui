@@ -148,3 +148,34 @@ def test_load_config_rejects_invalid_structure_without_overwriting():
 
         with open(cfgpath) as f:
             assert f.read() == '{"sources": "not a list", "targets": []}'
+
+
+def test_save_config_failure_preserves_old_file_and_removes_private_temp(tmp_path):
+    cfgpath = tmp_path / "config.json"
+    with mock.patch.object(config, "CONFIG_DIR", str(tmp_path)), \
+         mock.patch.object(config, "CONFIG_PATH", str(cfgpath)):
+        config.save_config({"secret": "old-test-value"})
+        before = cfgpath.read_bytes()
+        with mock.patch.object(config.os, "replace", side_effect=PermissionError("test")):
+            import pytest
+            with pytest.raises(PermissionError):
+                config.save_config({"secret": "new-test-value"})
+        assert cfgpath.read_bytes() == before
+        assert list(tmp_path.iterdir()) == [cfgpath]
+
+
+def test_save_config_temporary_file_is_private_before_writing(tmp_path):
+    import json
+    import stat
+    original = json.dump
+    modes = []
+
+    def inspect(data, stream, **kwargs):
+        modes.append(stat.S_IMODE(os.fstat(stream.fileno()).st_mode))
+        return original(data, stream, **kwargs)
+
+    with mock.patch.object(config, "CONFIG_DIR", str(tmp_path)), \
+         mock.patch.object(config, "CONFIG_PATH", str(tmp_path / "config.json")), \
+         mock.patch.object(config.json, "dump", side_effect=inspect):
+        config.save_config({"secret": "test-value"})
+    assert modes == [0o600]

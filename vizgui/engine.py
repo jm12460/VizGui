@@ -58,6 +58,7 @@ class Engine:
         self.now_live = False            # True while live-transcoding (no seek/dur)
         self._casting = False            # True from request until the launch finishes
         self._playback_request = None
+        self._sources_revision = 0
         self._poll_generation = 0
         self._confirmation_deadline = None
         self.auto_next = bool(config.CFG.get("auto_next", True))
@@ -597,6 +598,7 @@ class Engine:
             "target_index": self.target_index,
             "targets": targets,
             "sources": sources,
+            "sources_revision": self._sources_revision,
             "auto_next": self.auto_next,
             "playback_request": dict(self._playback_request) if self._playback_request else None,
             "interrupted": (self._interrupted_playback

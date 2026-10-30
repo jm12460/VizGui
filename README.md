@@ -40,6 +40,14 @@ When a server is detected, the desktop offers:
 
 The headless server currently supports one playback-owning session.
 
+In connected mode, **Sources** adds server-local folders or SMB shares and
+removes existing sources without restarting playback. Source administration is
+available on Linux only from a desktop running as the same OS user on the
+server computer. The separate local channel does not grant administration to
+paired phone clients; saved SMB passwords are never sent back in source lists.
+Remote desktops can still browse and control playback. See
+[server setup](docs/SERVER_SETUP.md#managing-server-sources) for details.
+
 Connected desktops retry temporary connection failures automatically while
 keeping the last playback display. A different server installation at the same
 address requires closing and reopening the desktop. Updated servers identify

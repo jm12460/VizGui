@@ -102,6 +102,10 @@ class _WebHandler(BaseHTTPRequestHandler):
             body = self._body()
         except Exception:
             return self._json({"ok": False, "error": "bad body"}, 400)
+        if not isinstance(body, dict):
+            return self._json({"ok": False, "error": "bad body"}, 400)
+        if str(body.get("kind", "")).startswith("source_"):
+            return self._json({"ok": False, "error": "Source management requires local administration"}, 403)
         dispatch = getattr(self.win, "web_dispatch", None)
         if dispatch is not None:
             result = dispatch(body.get("kind", ""), body)
@@ -121,7 +125,8 @@ def web_browse(src_idx, sub):
     try:
         base = source_path(srcs[src_idx])
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": ("Could not connect to SMB source"
+                                      if srcs[src_idx].get("kind") == "smb" else str(e))}
     real_base = os.path.realpath(base)
     tgt = os.path.realpath(os.path.join(real_base, sub))
     if not (tgt == real_base or tgt.startswith(real_base + os.sep)):
@@ -169,7 +174,8 @@ def web_search(src_idx, query, limit=300):
     try:
         base = source_path(srcs[src_idx])
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": ("Could not connect to SMB source"
+                                      if srcs[src_idx].get("kind") == "smb" else str(e))}
     real_base = os.path.realpath(base)
     exts = tuple(g[1:] for g in VIDEO_GLOBS)
 

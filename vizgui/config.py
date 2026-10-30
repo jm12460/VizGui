@@ -7,6 +7,7 @@ Other modules read the active cast target as ``config.HOST`` / ``config.TOK`` /
 import json
 import os
 import secrets
+import tempfile
 
 from .paths import CONFIG_DIR, CONFIG_PATH, log
 from . import platforms
@@ -28,14 +29,14 @@ def _migrate_default():
 
 def save_config(cfg):
     os.makedirs(CONFIG_DIR, exist_ok=True)
-    tmp = CONFIG_PATH + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(cfg, f, indent=2)
-    os.replace(tmp, CONFIG_PATH)
+    fd, tmp = tempfile.mkstemp(prefix=".config-", dir=CONFIG_DIR)
     try:
-        os.chmod(CONFIG_PATH, 0o600)   # may hold a share password
-    except OSError:
-        pass
+        with os.fdopen(fd, "w") as f:
+            json.dump(cfg, f, indent=2)
+        os.replace(tmp, CONFIG_PATH)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def ensure_web_secrets(cfg):

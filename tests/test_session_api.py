@@ -183,3 +183,15 @@ def test_current_instance_command_dispatched(api_server):
     with urllib.request.urlopen(req, timeout=3) as response:
         assert json.load(response)["ok"] is True
     assert len(controller.commands) == 1
+
+
+def test_phone_token_cannot_manage_sources_over_http(api_server):
+    base, controller = api_server
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        request(base, "/api/cmd", payload={"kind": "source_manage", "action": "add",
+                                            "source": {"path": "/test"}})
+    assert exc.value.code == 403
+    assert controller.commands == []
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        request(base, "/api/sources")
+    assert exc.value.code == 404

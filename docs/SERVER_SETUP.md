@@ -89,6 +89,32 @@ Neither `install.sh` nor `install.sh --update` installs, enables, reloads, or
 restarts the headless service. Updating source only affects the server the next
 time you deliberately start or restart it.
 
+## Managing server sources
+
+A connected desktop running on the server computer as the same Linux user can
+open **Sources** to add an absolute server folder or SMB share, or remove a
+source. Changes apply to the running server and appear in connected clients
+without a restart. Removing a source does not delete its files, unmount a share,
+or stop current playback. A folder path is interpreted and checked on the
+server; it is not a path on a separate desktop.
+
+Source administration uses a private Unix socket in the user's runtime
+directory, verifies the connecting OS user and current server instance, and
+rejects stale source-list revisions. The phone playback token cannot authorize
+these changes, and stored SMB credentials and unknown configuration fields are
+not returned in source lists. New SMB credentials enter over the local socket;
+the share is mounted on demand when browsing, not when it is added. Source
+management is currently unavailable from a remote machine or a different OS
+user; playback controls and browsing remain available as before. Use a local
+same-user desktop to manage sources.
+
+If the server configuration was changed externally while it was running, the
+server refuses to overwrite those changes. Review the external changes and
+restart the server deliberately when playback can be interrupted. Configuration
+save failures leave the existing file and in-memory sources unchanged. An older
+server must be deliberately restarted onto the updated code before source
+management becomes available; installing or updating VizGui never does this.
+
 ## What recovery does today
 
 - Closing a connected GUI leaves the server and playback running. A GUI network

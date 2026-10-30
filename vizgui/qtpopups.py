@@ -47,6 +47,7 @@ def show_dialog(dialog, finished=None):
 def message(parent, title, text, icon=QMessageBox.Information, finished=None):
     dialog = QMessageBox(parent)
     dialog.setWindowTitle(title)
+    dialog.setTextFormat(Qt.PlainText)
     dialog.setText(text)
     dialog.setIcon(icon)
     dialog.setStandardButtons(QMessageBox.Ok)
@@ -56,6 +57,7 @@ def message(parent, title, text, icon=QMessageBox.Information, finished=None):
 def confirm(parent, title, text, accepted):
     dialog = QMessageBox(parent)
     dialog.setWindowTitle(title)
+    dialog.setTextFormat(Qt.PlainText)
     dialog.setText(text)
     dialog.setIcon(QMessageBox.Question)
     dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.No)

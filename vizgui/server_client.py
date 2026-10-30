@@ -85,6 +85,10 @@ class ServerClient:
             {**payload, "kind": kind}, expected_server=server,
         )
 
+    def manage_sources(self, server, action, **payload):
+        from .source_admin import request
+        return request(self.host, server, action, **payload)
+
     def history(self):
         return self._request(
             f"/api/sessions/{self.session_id}/history"

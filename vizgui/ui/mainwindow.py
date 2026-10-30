@@ -110,9 +110,13 @@ class MainWindow(QMainWindow):
         self.b_continue.setToolTip("Resume something you were watching")
         self.b_continue.clicked.connect(self.show_continue)
         self.b_setup = QPushButton("⚙ Setup"); self.b_setup.clicked.connect(self.open_setup)
+        self.b_sources = QPushButton("Sources", browser)
+        self.b_sources.setVisible(self.connected_mode)
+        self.b_sources.clicked.connect(self.open_server_sources)
         hdr.addWidget(t); hdr.addStretch(1)
         hdr.addWidget(QLabel("Source:")); hdr.addWidget(self.source_box)
         hdr.addWidget(self.b_continue)
+        hdr.addWidget(self.b_sources)
         hdr.addWidget(self.b_setup)
         bl.addLayout(hdr)
         # search bar: recursive video-name search within the current source
@@ -364,8 +368,10 @@ class MainWindow(QMainWindow):
             self.np_time.setText(state.lower())
 
         sources = status.get("sources") or []
-        if sources != self._remote_sources:
+        revision = status.get("sources_revision")
+        if sources != self._remote_sources or revision != getattr(self, "_remote_sources_revision", None):
             self._remote_sources = sources
+            self._remote_sources_revision = revision
             self.source_box.blockSignals(True)
             self.source_box.clear()
             for source in sources:
@@ -925,6 +931,21 @@ class MainWindow(QMainWindow):
                 self._target_changed(self.target_box.currentIndex())
 
         show_dialog(dlg, completed)
+
+    def open_server_sources(self):
+        if not self.remote_controller.connected:
+            self._status("Connect to the server before managing sources")
+            return
+        dialog = getattr(self, "_sources_dialog", None)
+        if dialog is not None and dialog.isVisible():
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        from .server_sources import ServerSourcesDialog
+        dialog = ServerSourcesDialog(self.remote_controller, self)
+        self._sources_dialog = dialog
+        show_dialog(dialog, lambda _: setattr(self, "_sources_dialog", None))
+        dialog.refresh()
 
     def show_continue(self):
         """Continue-watching list: resume on the current target, forget, or clear."""

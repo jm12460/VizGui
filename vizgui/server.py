@@ -21,6 +21,7 @@ from .engine import Engine
 from .net import local_ip
 from .paths import log
 from .webremote import start_web_server
+from . import source_admin
 
 
 class HeadlessController:
@@ -37,6 +38,7 @@ class HeadlessController:
         # Preserve the original config indexes used by the phone UI.
         self.engine.set_target_index(config.CFG["targets"].index(cast_targets[0]))
         self.httpd = None
+        self.source_admin = None
 
     def on_status(self, message):
         log.info("headless: %s", message)
@@ -102,6 +104,10 @@ class HeadlessController:
 
     def serve(self, port, print_pin=True):
         self.httpd = start_web_server(self, port)
+        try:
+            self.source_admin = source_admin.start(self)
+        except Exception:
+            log.warning("Local source administration unavailable")
         log.info("headless server listening on port %s", port)
         print(f"VizGui headless remote: http://{local_ip()}:{port}", flush=True)
         # PIN is printed for initial setup; journal access should be restricted.
@@ -128,6 +134,11 @@ class HeadlessController:
                 self._process(fn, args, response)
         finally:
             self.stop_event.set()
+            if self.source_admin is not None:
+                try:
+                    source_admin.close(self.source_admin)
+                except Exception:
+                    log.warning("Could not close local source administration")
             if self.httpd is not None:
                 self.httpd.shutdown()
                 self.httpd.server_close()

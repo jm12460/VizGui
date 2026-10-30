@@ -7,6 +7,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Connected desktops on the server computer can add local and SMB sources or
+  remove sources through a same-user Linux Unix socket without restarting playback.
+  Phone tokens cannot administer sources, saved SMB credentials are not returned,
+  and stale or externally changed configurations are rejected.
 - Playback request IDs and explicit accepted/starting/playing/failed feedback in
   the API, desktop, and phone remote. Playing requires fresh receiver confirmation;
   launch errors persist and confirmation timeouts never retry commands.
@@ -24,6 +28,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   disconnect/reconnect behavior, and client shutdown safety.
 
 ### Fixed
+- Configuration saves create private, uniquely named temporary files before
+  atomically replacing the configuration, protecting SMB credentials during saves.
 - Superseded launch callbacks, queued launches after cancellation, and stale
   status responses cannot overwrite the latest playback request result.
 - Interrupted recovery checkpoints are retained until playback is confirmed.

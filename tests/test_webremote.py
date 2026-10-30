@@ -143,3 +143,15 @@ def test_web_search_results_pass_path_confinement():
         with mock.patch.object(config, "CFG", {"sources": [{"name": "T", "path": d}]}):
             r = webremote.web_search(0, "clip")
             assert all(webremote.web_path_ok(e["path"]) for e in r["entries"])
+
+
+def test_smb_mount_errors_do_not_expose_credentials(monkeypatch):
+    from vizgui import config, webremote
+    monkeypatch.setattr(config, "CFG", {"sources": [{"kind": "smb", "name": "Test",
+                                                    "smb": {"password": "fake-secret"}}]})
+    def fail(_):
+        raise RuntimeError("mount echoed fake-secret")
+    monkeypatch.setattr(webremote, "source_path", fail)
+    for result in (webremote.web_browse(0, ""), webremote.web_search(0, "episode")):
+        assert result == {"ok": False, "error": "Could not connect to SMB source"}
+        assert "fake-secret" not in str(result)

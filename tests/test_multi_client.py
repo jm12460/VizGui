@@ -449,3 +449,41 @@ def test_accepted_http_launch_failure_is_visible_to_all_clients_without_retries(
     assert request == session.second.connection_status()["playback_request"]
     assert request == session.phone()["playback_request"]
     launch.assert_called_once()
+
+
+def test_local_source_admin_updates_clients_without_playback_commands(session, tmp_path, monkeypatch):
+    from vizgui import source_admin
+    import copy
+    import json
+
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    monkeypatch.setattr(config, "CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(config, "CONFIG_PATH", str(config_dir / "config.json"))
+    original = copy.deepcopy(config.CFG)
+    config.save_config(original)
+    identity = session.first.connection_status()["server"]
+    handle = source_admin.start(session.controller)
+    try:
+        folder = tmp_path / "new media"
+        folder.mkdir()
+        listed = session.first.manage_sources(identity, "list")
+        added = session.first.manage_sources(identity, "add", revision=listed["revision"],
+                                             source={"path": str(folder), "name": "New media"})
+        assert added["ok"]
+        first = session.first.connection_status()
+        second = session.second.connection_status()
+        phone = session.phone()
+        assert first["sources"] == second["sources"] == phone["sources"]
+        assert first["sources"][0]["name"] == "New media"
+        assert first["sources_revision"] == second["sources_revision"] == 1
+        assert session.device.operations == []
+        assert session.dispatched == []
+        persisted = json.loads((config_dir / "config.json").read_text())
+        assert persisted["web"] == original["web"]
+        assert persisted["targets"] == original["targets"]
+    finally:
+        source_admin.close(handle)
