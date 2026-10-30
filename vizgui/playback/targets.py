@@ -67,8 +67,11 @@ class CastTarget(PlaybackTarget):
                                    # times out ("context deadline exceeded") on re-cast
         base = [GC, "--addr", config.TV_IP, "--port", config.CAST_PORT]
         if plan == "direct":
+            # Include the resume offset in LOAD. A separate seek after a fixed
+            # delay can race receiver initialization and silently start at zero.
             self.handle = platforms.launch_caster(
-                base + ["load", media.symlink_serve(path)], log_path=CASTER_LOG)
+                base + ["load", "--start-time", str(int(resume)), media.symlink_serve(path)],
+                log_path=CASTER_LOG)
             what = "direct"
         else:
             # a live stream resumes by seeking the input (-ss); it begins at `resume`
@@ -81,8 +84,6 @@ class CastTarget(PlaybackTarget):
             what = "live remux" if plan == "remux" else f"live transcode ({'hw' if HAS_HW else 'cpu'})"
         time.sleep(5)              # let it establish + the TV start
         alive = self.handle.poll() is None
-        if alive and resume and plan == "direct":
-            gc("seek-to", str(int(resume)))   # direct file: seek the real timeline
         log.info("caster pid=%s alive=%s (%s) resume=%s", self.handle.pid, alive, what, resume)
         return "playing" if alive else f"go-chromecast exited (rc={self.handle.returncode})"
 

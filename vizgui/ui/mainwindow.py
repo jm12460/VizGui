@@ -323,9 +323,9 @@ class MainWindow(QMainWindow):
                 self.source_box.addItem(
                     source.get("name", "?"), source)
             self.source_box.blockSignals(False)
-            if sources:
-                self.remote_tree.set_source(
-                    self.source_box.currentIndex())
+            # Server-side source changes must invalidate both browsing and
+            # search callbacks, including when the last source is removed.
+            self._source_changed(self.source_box.currentIndex())
 
         targets = status.get("targets") or []
         names = [t.get("name", "?") for t in targets]

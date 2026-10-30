@@ -6,7 +6,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Isolated multi-client integration tests for two desktops and the phone API
+  sharing one headless playback session, including concurrent commands,
+  disconnect/reconnect behavior, and client shutdown safety.
+
 ### Fixed
+- Direct Cast resumes now include the saved position in the initial load
+  request, avoiding a follow-up seek that could fail before media initialization
+  and silently start playback at the beginning.
+- Connected desktops clear stale browsing/search selections when the server's
+  source list changes, including removal of the last source. Late responses
+  from the previous source cannot restore obsolete results.
 - Resuming an episode in VLC no longer applies its saved timestamp to later
   playlist entries. Queued episodes start at zero, including when reusing a VLC
   instance launched with the old global resume option.

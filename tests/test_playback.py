@@ -2,6 +2,8 @@ import os
 import tempfile
 from unittest import mock
 
+import pytest
+
 from vizgui.playback import media, targets
 
 
@@ -106,20 +108,6 @@ def test_vlc_native_skip_and_advance_depend_on_mode():
     assert t.native_skip() is False and t.needs_advance_on_end() is True
 
 
-def test_cast_direct_resume_seeks_to():
-    t = targets.CastTarget()
-    calls = []
-    with mock.patch.object(targets, "gc", side_effect=lambda *a, **k: calls.append(a) or (True, "")), \
-         mock.patch.object(targets.media, "vcodec", return_value="h264"), \
-         mock.patch.object(targets.media, "symlink_serve", return_value="/cache/x.mp4"), \
-         mock.patch.object(targets.platforms, "launch_caster",
-                           return_value=mock.Mock(poll=lambda: None, pid=5, returncode=0)), \
-         mock.patch.object(targets.time, "sleep", lambda *a: None):
-        res = t.start("/m/x.mp4", ["/m/x.mp4"], False, resume=600)
-    assert res == "playing"
-    assert ("seek-to", "600") in calls
-
-
 def test_vlc_launch_includes_start_time_on_resume():
     t = targets.VlcTarget()
     captured = {}
@@ -199,3 +187,32 @@ def test_vlc_own_http_hiccup_is_busy_not_idle():
     with mock.patch.object(targets, "vlc_status", return_value={"error": "timeout"}):
         st = t.status()
     assert st["idle"] is True and st["busy"] is True   # transient, not ended
+
+
+@pytest.mark.parametrize("resume", [0, 600])
+def test_direct_cast_resume_is_part_of_load_not_a_racy_followup_seek(resume):
+    t = targets.CastTarget()
+    launched = {}
+    commands = []
+
+    def fake_gc(*args, **kwargs):
+        commands.append(args)
+        if args[0] == "seek-to":
+            return False, "media not yet initialised"
+        return True, ""
+
+    def launch(args, **kwargs):
+        launched["args"] = args
+        return mock.Mock(poll=lambda: None, pid=5, returncode=0)
+
+    with mock.patch.object(targets, "gc", side_effect=fake_gc), \
+         mock.patch.object(targets.media, "vcodec", return_value="h264"), \
+         mock.patch.object(targets.media, "symlink_serve", return_value="/cache/episode.mp4"), \
+         mock.patch.object(targets.platforms, "launch_caster", side_effect=launch), \
+         mock.patch.object(targets.time, "sleep", lambda _: None):
+        assert t.start("/media/episode.mp4", ["/media/episode.mp4"], False,
+                       resume=resume) == "playing"
+    args = launched["args"]
+    assert args[args.index("load"):] == ["load", "--start-time", str(resume),
+                                        "/cache/episode.mp4"]
+    assert not any(cmd[0] == "seek-to" for cmd in commands)
