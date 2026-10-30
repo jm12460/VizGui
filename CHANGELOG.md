@@ -7,6 +7,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Connected desktops offer explicit recovery of known interrupted Cast playback
+  after server outages, with persisted checkpoints and stale-request protection
+  across multiple clients. Dismissing the non-modal prompt never starts playback.
 - A service-file renderer validates Python/module paths for source-checkout and
   installed-package setups without installing or controlling a service.
 - Server setup/recovery instructions and isolated restart-recovery tests for
@@ -16,6 +19,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   disconnect/reconnect behavior, and client shutdown safety.
 
 ### Fixed
+- Failed Cast status requests no longer count as confirmed idle playback.
+- Failed startup reattachment preserves a checkpoint for explicit manual recovery.
 - Direct Cast resumes now include the saved position in the initial load
   request, avoiding a follow-up seek that could fail before media initialization
   and silently start playback at the beginning.

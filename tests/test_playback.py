@@ -216,3 +216,11 @@ def test_direct_cast_resume_is_part_of_load_not_a_racy_followup_seek(resume):
     assert args[args.index("load"):] == ["load", "--start-time", str(resume),
                                         "/cache/episode.mp4"]
     assert not any(cmd[0] == "seek-to" for cmd in commands)
+
+
+def test_cast_status_failure_is_unknown_not_confirmed_idle():
+    t = targets.CastTarget()
+    with mock.patch.object(targets, "gc", return_value=(False, "connection refused")):
+        status = t.status()
+    assert status["busy"] is True
+    assert status["error"] == "connection refused"

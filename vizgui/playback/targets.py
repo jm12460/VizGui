@@ -114,6 +114,9 @@ class CastTarget(PlaybackTarget):
 
     def status(self):
         ok, out = gc("status", timeout=8)
+        if not ok:
+            # A failed status request is not evidence that playback is idle.
+            return {"idle": True, "busy": True, "error": out}
         line = out.splitlines()[0] if out else ""
         if not line or "Idle" in line or "Backdrop" in line:
             return {"idle": True, "busy": bool(self.handle and self.handle.poll() is None)}

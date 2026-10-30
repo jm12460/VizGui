@@ -125,3 +125,79 @@ def test_another_client_target_and_autonext_changes_render_without_echo(window):
     win.remote_controller.select_target.assert_not_called()
     win.remote_controller.set_autonext.assert_not_called()
     assert pending == []
+
+
+def interrupted_status():
+    return {**status([]), "server": {"id": "test-server", "instance_id": "test-process"},
+            "interrupted": {"id": "checkpoint-a", "path": "/test/episode.mp4",
+                            "title": "Episode", "pos": 420}}
+
+
+@pytest.mark.parametrize("choice", ["Resume", "Not now", "close"])
+def test_interrupted_playback_is_nonmodal_and_needs_explicit_resume(window, choice):
+    win, _ = window
+    state = interrupted_status()
+    win._offer_interrupted_playback(state)
+    dialog = win._interrupted_dialog
+    assert dialog.isVisible()
+    assert not dialog.isModal()
+    assert not dialog.isSizeGripEnabled()
+    assert "7:00" in dialog.text()
+    win.remote_controller.resume_interrupted.assert_not_called()
+    win._offer_interrupted_playback(state)
+    assert win._interrupted_dialog is dialog
+    if choice == "close":
+        dialog.reject()
+    else:
+        next(b for b in dialog.buttons() if b.text() == choice).click()
+    if choice == "Resume":
+        win.remote_controller.resume_interrupted.assert_called_once_with("checkpoint-a", 0)
+    else:
+        win.remote_controller.resume_interrupted.assert_not_called()
+    win._offer_interrupted_playback(state)
+    assert win._interrupted_dialog is None  # no repeated prompts on each poll
+
+
+@pytest.mark.parametrize("change", ["other_client_playing", "target_changed", "process_changed"])
+def test_stale_interruption_prompt_closes_without_starting_playback(window, change):
+    win, _ = window
+    state = interrupted_status()
+    win._offer_interrupted_playback(state)
+    dialog = win._interrupted_dialog
+    if change == "other_client_playing":
+        new = {**state, "interrupted": None}
+    elif change == "target_changed":
+        new = {**state, "target_index": 1}
+    else:
+        new = {**state, "server": {**state["server"], "instance_id": "new-process"}}
+    win._offer_interrupted_playback(new)
+    assert not dialog.isVisible()
+    if change == "other_client_playing":
+        assert win._interrupted_dialog is None
+    else:
+        assert win._interrupted_dialog is not dialog
+        win._interrupted_dialog.reject()
+    win.remote_controller.resume_interrupted.assert_not_called()
+
+
+def test_disconnect_closes_interruption_prompt_without_command(window):
+    win, _ = window
+    win._offer_interrupted_playback(interrupted_status())
+    dialog = win._interrupted_dialog
+    win._remote_connection_changed(False)
+    assert not dialog.isVisible()
+    assert win._interrupted_dialog is None
+    win.remote_controller.resume_interrupted.assert_not_called()
+
+
+def test_disconnect_does_not_count_as_user_dismissing_checkpoint(window):
+    win, _ = window
+    state = interrupted_status()
+    win._offer_interrupted_playback(state)
+    first = win._interrupted_dialog
+    win._remote_connection_changed(False)
+    win._offer_interrupted_playback(state)
+    assert win._interrupted_dialog is not None
+    assert win._interrupted_dialog is not first
+    win._interrupted_dialog.reject()
+    win.remote_controller.resume_interrupted.assert_not_called()

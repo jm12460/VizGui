@@ -243,6 +243,8 @@ class MainWindow(QMainWindow):
             self.setWindowTitle("vizgui — Connected")
             self.remote_controller.status_changed.connect(
                 self._render_remote)
+            self.remote_controller.status_changed.connect(
+                self._offer_interrupted_playback)
             self.remote_controller.connection_changed.connect(
                 self._remote_connection_changed)
             self.remote_controller.error.connect(self._status)
@@ -287,6 +289,53 @@ class MainWindow(QMainWindow):
         else:
             self._status("Server connection lost — retrying automatically")
             self.remote.set_tv_enabled(False)
+            dialog = getattr(self, "_interrupted_dialog", None)
+            if dialog is not None:
+                self._interrupted_context = None
+                dialog.reject()
+
+    def _offer_interrupted_playback(self, status):
+        """Offer a server-confirmed checkpoint once, without starting playback."""
+        entry = status.get("interrupted")
+        server = status.get("server") or {}
+        context = (server.get("id"), server.get("instance_id"),
+                   entry.get("id") if isinstance(entry, dict) else None,
+                   status.get("target_index"))
+        existing = getattr(self, "_interrupted_dialog", None)
+        if existing is not None:
+            if context == getattr(self, "_interrupted_context", None):
+                return
+            self._interrupted_context = None
+            existing.reject()
+        if (getattr(self, "_popup_closed", False) or not isinstance(entry, dict)
+                or not isinstance(entry.get("id"), str)
+                or type(entry.get("pos")) is not int or entry["pos"] <= 0):
+            return
+        # A dismissed checkpoint should not repeatedly prompt on each poll or
+        # restart. It remains available through the normal Continue Watching list.
+        key = (server.get("id"), entry["id"])
+        if key == getattr(self, "_interrupted_seen", None):
+            return
+        self._interrupted_context = context
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Resume interrupted playback")
+        dialog.setTextFormat(Qt.PlainText)
+        title = entry.get("title") or "the interrupted episode"
+        dialog.setText(f"Playback was interrupted. Resume {title} from "
+                       f"{fmt_time(entry['pos'])} on the current Cast target?")
+        resume = dialog.addButton("Resume", QMessageBox.AcceptRole)
+        dialog.addButton("Not now", QMessageBox.RejectRole)
+        self._interrupted_dialog = dialog
+
+        def selected(_):
+            self._interrupted_dialog = None
+            if self._interrupted_context != context:
+                return
+            self._interrupted_seen = key
+            if dialog.clickedButton() is resume:
+                self.remote_controller.resume_interrupted(entry["id"], status.get("target_index"))
+
+        show_dialog(dialog, selected)
 
     def _render_remote(self, status):
         """Render server state using the original MainWindow widgets."""

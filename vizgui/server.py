@@ -87,7 +87,7 @@ class HeadlessController:
                     return
             except (ValueError, TypeError, IndexError):
                 return
-        self.call(self.engine.web_do, kind, payload)
+        return self.call(self.engine.web_do, kind, payload)
 
     def _process(self, fn, args, response):
         try:

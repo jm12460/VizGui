@@ -62,6 +62,9 @@ class Engine:
         self._user_stopped = False       # True when the user hit Stop (no auto-next)
         self._recovered_cast_session = False
         self._startup_recast_attempted = False
+        self._interruption_checked = False
+        self._interrupted_playback = None
+        self._receiver_idle = False
         # last-known playback, advanced locally once a second between polls
         self._np_pos = 0; self._np_dur = 0; self._np_state = ""; self._np_playing = False
         self._resume_base = 0            # secs a live stream was resumed from
@@ -170,7 +173,7 @@ class Engine:
 
     def cast(self, path, resume=0, audio=None, sub=None):
         if self._observer_blocked():
-            return
+            return False
         self.remember()                  # save position of the file we're leaving
         self._now_path = path
         self._resume_base = resume
@@ -184,12 +187,13 @@ class Engine:
             self._message = msg
             self._changed()
             self._status(msg)
-            return
+            return False
         self._message = None
         self.now_title = os.path.basename(path.rstrip(os.sep)) or path
         if self.target == "cast":
             history.set_current(path, self.now_title, resume)
         self._casting = True
+        self._receiver_idle = False
         self._np_pos = 0
         self._np_playing = False
         self._media = {"audio": [], "subs": [], "chapters": []}
@@ -204,10 +208,14 @@ class Engine:
                     history.clear_current()
                 self._message = str(res)
                 self._status(str(res))
+            elif self.target == "cast":
+                self._interrupted_playback = None
+                history.clear_interrupted()
             self._changed()
             self.poll_cast()
         self._run(lambda: self.active.start(path, items, self.auto_next, resume, audio, sub), done)
         self._run(lambda: probe.probe(path), lambda r: self._probe_done(path, r))
+        return True
 
     def _probe_done(self, path, res):
         if path != self._now_path:       # cast failed or moved on -> no stale controls
@@ -288,6 +296,9 @@ class Engine:
     def stop(self):
         if self._observer_blocked():
             return
+        if self.target == "cast":
+            self._interrupted_playback = None
+            history.clear_interrupted()
         self._user_stopped = True
         if self.target == "cast":
             history.clear_current()
@@ -382,7 +393,9 @@ class Engine:
         if st.get("idle"):
             # our process still starting, or mid-launch -> transient, keep state
             if self._casting or st.get("busy"):
+                self._receiver_idle = False
                 return
+            self._receiver_idle = True
             if self._saw_playing:
                 # Cast receivers can drop a paused session and report Idle. That is
                 # not evidence the episode finished, so don't auto-next if our last
@@ -401,9 +414,13 @@ class Engine:
             self._sub = None
             self._message = None
             if self.target == "cast":
+                if not self._interruption_checked:
+                    self._interruption_checked = True
+                    self._interrupted_playback = history.capture_interrupted()
                 history.clear_current()
             self._changed()
             return
+        self._receiver_idle = False
         self._message = None
         if self.target == "cast" and not self._now_path:
             self.recover_cast_item(st)
@@ -432,6 +449,11 @@ class Engine:
             self._startup_recast_attempted = True
             self._recovered_cast_session = False
             log.info("reattaching to Cast stream at %ss: %s", resume, self.now_title)
+            # Preserve a manual recovery option if this automatic reattachment
+            # fails after the receiver's remaining buffer has expired.
+            self.remember()
+            self._interrupted_playback = history.capture_interrupted(replace=True)
+            self._interruption_checked = True
             self.cast(self._now_path, resume)
             return
         if self._np_playing and time.time() - self._last_save > 12:
@@ -506,6 +528,9 @@ class Engine:
             "targets": targets,
             "sources": sources,
             "auto_next": self.auto_next,
+            "interrupted": (self._interrupted_playback
+                            if self.target == "cast" and self._receiver_idle
+                            and not self._casting and not self._cast_observer() else None),
             "tv": self._tv_text if config.HOST else "",
             "now": {"title": self.now_title or "", "pos": self._np_pos,
                     "dur": self._np_dur, "state": self._np_state, "live": self.now_live},
@@ -538,10 +563,11 @@ class Engine:
         self._changed()                  # target list grew -> view rebuilds the picker
 
     def web_do(self, kind, p):
+        """Apply a remote action on the GUI thread or headless owner queue."""
+        if kind == "resume_interrupted":
+            return self.resume_interrupted(p.get("id"), p.get("target_index"))
         if self.playback_role == "observer" and kind in ("forget", "clear"):
             return
-        """Apply a phone action. In the GUI this is marshaled onto the main thread;
-        headless it runs on the HTTP thread. Either way it only touches engine state."""
         try:
             if kind == "key":
                 self.send_key(p["cmd"])
@@ -571,8 +597,14 @@ class Engine:
                     log.warning("web cast refused (outside sources): %s", path)
             elif kind == "forget":
                 history.forget(p.get("path", ""))
+                if (self._interrupted_playback
+                        and p.get("path") == self._interrupted_playback["path"]):
+                    self._interrupted_playback = None
+                    history.clear_interrupted()
             elif kind == "clear":
                 history.clear()
+                self._interrupted_playback = None
+                history.clear_interrupted()
             elif kind == "jump":
                 self.jump_to(int(p.get("secs", 0) or 0))
             elif kind == "audio":
@@ -584,3 +616,17 @@ class Engine:
                 self.select_sub(s)
         except Exception as e:
             log.warning("web action %s failed: %s", kind, e)
+
+    def resume_interrupted(self, checkpoint_id, target_index):
+        """Validate a user-confirmed checkpoint on the playback owner thread."""
+        entry = self._interrupted_playback
+        if (self.playback_role != "owner" or self.target != "cast"
+                or not self._receiver_idle or self._casting
+                or not entry or checkpoint_id != entry["id"]
+                or type(target_index) is not int or target_index != self.target_index):
+            return {"ok": False, "error": "Interrupted playback is no longer available"}
+        if not web_path_ok(entry["path"]):
+            return {"ok": False, "error": "Interrupted media is missing or outside configured sources"}
+        if not self.cast(entry["path"], entry["pos"]):
+            return {"ok": False, "error": self._message or "Could not resume playback"}
+        return {"ok": True}

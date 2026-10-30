@@ -104,7 +104,9 @@ class _WebHandler(BaseHTTPRequestHandler):
             return self._json({"ok": False, "error": "bad body"}, 400)
         dispatch = getattr(self.win, "web_dispatch", None)
         if dispatch is not None:
-            dispatch(body.get("kind", ""), body)
+            result = dispatch(body.get("kind", ""), body)
+            if isinstance(result, dict):
+                return self._json(result, 200 if result.get("ok") else 409)
         else:
             self.win.web_bridge.do.emit(body.get("kind", ""), body)
         return self._json({"ok": True})

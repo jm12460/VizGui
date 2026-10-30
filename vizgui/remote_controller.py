@@ -158,6 +158,9 @@ class RemoteController(QObject):
     def cast(self, path, resume=0):
         self.command("cast", path=path, resume=resume)
 
+    def resume_interrupted(self, checkpoint_id, target_index):
+        self.command("resume_interrupted", id=checkpoint_id, target_index=target_index)
+
     def set_autonext(self, enabled):
         self.command("autonext", on=bool(enabled))
 

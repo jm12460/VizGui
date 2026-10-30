@@ -7,6 +7,7 @@ not the one it was last played on. Pure logic (path-injectable) so it's testable
 import json
 import os
 import time
+import uuid
 
 from .paths import CONFIG_DIR
 
@@ -113,6 +114,62 @@ def current():
 def clear_current():
     try:
         os.remove(CURRENT_PATH)
+    except OSError:
+        pass
+
+
+def _interrupted_path():
+    return os.path.join(os.path.dirname(CURRENT_PATH), "interrupted_playback.json")
+
+
+def interrupted():
+    """Read an explicit interrupted-session checkpoint, never guess from history."""
+    try:
+        with open(_interrupted_path(), encoding="utf-8") as f:
+            entry = json.load(f)
+        if (isinstance(entry, dict) and isinstance(entry.get("id"), str)
+                and entry["id"] and isinstance(entry.get("path"), str)
+                and entry["path"] and type(entry.get("pos")) is int
+                and entry["pos"] > 0):
+            return entry
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def capture_interrupted(*, replace=False):
+    """Preserve the known current file at its last recorded position."""
+    previous = interrupted()
+    if previous is not None and not replace:
+        return previous
+    saved = current()
+    if not saved:
+        return None
+    path = saved["path"]
+    if not isinstance(path, str) or not os.path.isabs(path):
+        return None
+    record = load().get(path)
+    if (not isinstance(record, dict) or type(record.get("pos")) is not int
+            or record["pos"] < _MIN_POS or not os.path.isfile(path)):
+        return None
+    entry = {"id": str(uuid.uuid4()), "path": path,
+             "title": record.get("title") or saved.get("title") or os.path.basename(path),
+             "pos": record["pos"]}
+    try:
+        os.makedirs(os.path.dirname(_interrupted_path()), exist_ok=True)
+        temporary = _interrupted_path() + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as f:
+            os.chmod(temporary, 0o600)
+            json.dump(entry, f)
+        os.replace(temporary, _interrupted_path())
+    except OSError:
+        pass
+    return entry
+
+
+def clear_interrupted():
+    try:
+        os.remove(_interrupted_path())
     except OSError:
         pass
 

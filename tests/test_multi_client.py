@@ -26,6 +26,7 @@ TOKEN = "multi-client-test-token"
 
 class PlaybackDevice:
     """Thread-safe in-memory device; never launches a process or opens a socket."""
+    name = "Test Cast device"
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -37,6 +38,16 @@ class PlaybackDevice:
         with self.lock:
             return {"idle": False, "state": self.state, "pos": self.position,
                     "dur": 600, "file": "test-movie.mp4"}
+
+    def available(self):
+        return True, ""
+
+    def start(self, path, items, auto_next, resume, audio, sub):
+        with self.lock:
+            self.operations.append(("start", path, resume))
+            self.position = resume
+            self.state = "PLAYING"
+        return "playing"
 
     def pause(self):
         with self.lock:
@@ -72,6 +83,7 @@ def session(tmp_path, monkeypatch, request):
     monkeypatch.setattr(config, "HOST", None)
     monkeypatch.setattr(config, "set_active_cast", Mock())
     monkeypatch.setattr(engine, "save_config", Mock())
+    monkeypatch.setattr(engine.probe, "probe", lambda _: {"chapters": []})
     monkeypatch.setattr(history, "CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(history, "HISTORY_PATH", str(tmp_path / "history.json"))
     monkeypatch.setattr(history, "CURRENT_PATH", str(tmp_path / "current.json"))
@@ -349,3 +361,52 @@ def test_queued_command_from_closed_client_cannot_interrupt_other_client(session
     assert second.snapshot["now"]["pos"] == 270
     assert session.device.operations == [("seek", 270)]
     assert len(session.dispatched) == 1
+
+
+def prepare_interrupted_session(session, tmp_path):
+    path = tmp_path / "interrupted.mp4"
+    path.write_bytes(b"fake media")
+
+    def interrupted():
+        config.CFG["sources"] = [{"path": str(tmp_path), "name": "Test media"}]
+        history.record(str(path), 120, 600, "Interrupted episode")
+        history.set_current(str(path), "Interrupted episode", 0)
+        session.controller.engine._now_path = None
+        session.controller.engine._saw_playing = False
+        session.controller.engine._poll_done({"idle": True, "busy": False})
+
+    session.controller.call(interrupted)
+    return path, session.first.connection_status()["interrupted"]
+
+
+def test_two_clients_cannot_resume_same_checkpoint_twice(session, tmp_path):
+    path, checkpoint = prepare_interrupted_session(session, tmp_path)
+    identity = session.first.connection_status()["server"]
+    assert session.second.connection_status()["interrupted"] == checkpoint
+    assert session.device.operations == []
+    barrier = threading.Barrier(2)
+
+    def resume(client):
+        barrier.wait(timeout=3)
+        try:
+            return client.command_for_server(identity, "resume_interrupted",
+                                             id=checkpoint["id"], target_index=0)
+        except ServerConnectionError:
+            return {"ok": False}
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [pool.submit(resume, client) for client in (session.first, session.second)]
+        assert sorted(result.result(timeout=5)["ok"] for result in results) == [False, True]
+    wait_for(session.first, pos=120)
+    assert session.device.operations == [("start", str(path), 120)]
+    assert session.phone()["interrupted"] is None
+    assert history.interrupted() is None
+
+
+def test_stale_checkpoint_is_rejected_by_http_without_device_io(session, tmp_path):
+    _, checkpoint = prepare_interrupted_session(session, tmp_path)
+    identity = session.first.connection_status()["server"]
+    with pytest.raises(ServerConnectionError):
+        session.first.command_for_server(identity, "resume_interrupted", id="stale", target_index=0)
+    assert session.device.operations == []
+    assert session.second.connection_status()["interrupted"] == checkpoint

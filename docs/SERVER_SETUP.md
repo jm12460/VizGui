@@ -103,9 +103,22 @@ time you deliberately start or restart it.
   input offset to the receiver's stream-relative position.
 - A paused receiver is not automatically unpaused. Reattachment is deferred
   until it reports playing again.
-- If the receiver has gone idle, the saved Continue Watching position remains
-  available for explicit resumption. The server does not automatically start an
-  episode merely because it appears in history.
+- If the receiver has gone idle, the server preserves the known interrupted
+  source and its last recorded position in `interrupted_playback.json` beside
+  the other playback state. Connected desktops offer **Resume interrupted
+  playback** once for that checkpoint. **Not now** or closing the prompt leaves
+  playback alone; the normal Continue Watching list remains available.
+- Clicking Resume sends a checkpoint ID and expected target, not a client-chosen
+  file or timestamp. The server rechecks that the receiver is idle, the target
+  is unchanged, and the file still belongs to a configured source. Two clients
+  cannot launch the same recovery simultaneously. Failed requests are never
+  replayed automatically. A failed launch retains the checkpoint for manual
+  retry; a successful Cast launch, Stop, or removing its history clears it.
+- A TV status failure is treated as unknown, not confirmed idle, so it cannot
+  itself trigger the recovery prompt. A checkpoint is created only from the
+  saved current-session identity and its unfinished history entry, never by
+  choosing an arbitrary episode from history. The checkpoint survives repeated
+  server restarts until resumed or explicitly cleared.
 - Missing files and live streams without a saved source identity are not
   guessed. A failed reattachment reports an error rather than repeatedly
   launching playback. Saved history remains available for a manual retry.
