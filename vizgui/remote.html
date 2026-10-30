@@ -239,6 +239,14 @@ async function poll(){const d=await api('/api/status');if(!d.ok)return;
  if(n.live){prog.style.width='100%';tm.textContent=fmt(n.pos)+'  ·  live';}
  else if(n.dur>0){prog.style.width=(100*Math.min(n.pos,n.dur)/n.dur)+'%';tm.textContent=fmt(n.pos)+' / '+fmt(n.dur)+(n.state&&n.state!=='PLAYING'?'  ·  '+n.state.toLowerCase():'');}
  else{prog.style.width='0';tm.textContent=n.state?n.state.toLowerCase():'';}
+ const request=d.playback_request||{};
+ if(request.state==='accepted'||request.state==='starting'){
+  $('np').textContent='Starting: '+(request.title||'playback')+'…';
+  $('badge').style.display='none';prog.style.width='0';tm.textContent='Waiting for playback confirmation';
+ }else if(request.state==='failed'){
+  $('np').textContent='Playback failed: '+(request.title||'media');
+  $('badge').style.display='none';prog.style.width='0';tm.textContent=request.error||'Could not start playback';
+ }
  $('tv').textContent=d.tv||'';
  anState=!!d.auto_next;const an=$('anbtn');an.textContent='Auto-next: '+(anState?'on':'off');an.classList.toggle('ac',anState);
  lastSources=JSON.stringify(d.sources||[]);

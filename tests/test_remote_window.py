@@ -201,3 +201,19 @@ def test_disconnect_does_not_count_as_user_dismissing_checkpoint(window):
     assert win._interrupted_dialog is not first
     win._interrupted_dialog.reject()
     win.remote_controller.resume_interrupted.assert_not_called()
+
+
+@pytest.mark.parametrize("state", ["starting", "failed", "playing"])
+def test_remote_window_renders_playback_request_result(window, state):
+    win, _ = window
+    request = {"id": "request-a", "state": state, "title": "Episode",
+               "error": "Test launch error" if state == "failed" else None}
+    win._render_remote({**status([]), "playback_request": request})
+    if state == "failed":
+        win.np_title.setText.assert_called_with("Playback failed: Episode")
+        win.np_time.setText.assert_called_with("Test launch error")
+    elif state == "starting":
+        win.np_title.setText.assert_called_with("Starting: Episode…")
+        win.np_time.setText.assert_called_with("Waiting for playback confirmation")
+    else:
+        win.np_title.setText.assert_called_with("Movie")

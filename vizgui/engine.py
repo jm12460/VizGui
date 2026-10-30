@@ -40,6 +40,7 @@ def run_sync(fn, on_done=None):
 
 
 class Engine:
+    PLAYBACK_CONFIRM_TIMEOUT = 45
     def __init__(self, run_async=run_sync, on_change=None, on_status=None,
                  playback_role="owner"):
         if playback_role not in ("owner", "observer"):
@@ -56,6 +57,9 @@ class Engine:
         self.now_title = None            # real filename of what we're casting
         self.now_live = False            # True while live-transcoding (no seek/dur)
         self._casting = False            # True from request until the launch finishes
+        self._playback_request = None
+        self._poll_generation = 0
+        self._confirmation_deadline = None
         self.auto_next = bool(config.CFG.get("auto_next", True))
         self._now_path = None            # the file currently cast ("next in folder")
         self._saw_playing = False        # True once this cast reached PLAYING
@@ -114,6 +118,8 @@ class Engine:
         targets = config.CFG.get("targets", [])
         if not (0 <= i < len(targets)):
             return
+        if i != self.target_index:
+            self._cancel_playback_request("Playback start cancelled: target changed")
         self.target_index = i
         self._apply_target(targets[i])
         log.info("target -> %s (%s)", self.target, targets[i].get("name"))
@@ -174,6 +180,13 @@ class Engine:
     def cast(self, path, resume=0, audio=None, sub=None):
         if self._observer_blocked():
             return False
+        request_id = secrets.token_hex(8)
+        title = os.path.basename(path.rstrip(os.sep)) or path
+        self._playback_request = {"id": request_id, "state": "accepted",
+                                  "title": title, "error": None, "error_code": None}
+        self._confirmation_deadline = None
+        self._poll_generation += 1
+        self._casting = False
         self.remember()                  # save position of the file we're leaving
         self._now_path = path
         self._resume_base = resume
@@ -184,6 +197,7 @@ class Engine:
         self._user_stopped = False
         ok, msg = self.active.available()
         if not ok:
+            self._playback_request.update(state="failed", error=str(msg))
             self._message = msg
             self._changed()
             self._status(msg)
@@ -193,6 +207,7 @@ class Engine:
         if self.target == "cast":
             history.set_current(path, self.now_title, resume)
         self._casting = True
+        self._playback_request["state"] = "starting"
         self._receiver_idle = False
         self._np_pos = 0
         self._np_playing = False
@@ -200,22 +215,56 @@ class Engine:
         self._changed()                  # render "Preparing…", disable cast, hide tracks
         items = media.folder_queue(path) if (self.auto_next and os.sep in path) else [path]
         log.info("CAST requested: %s -> %s", path, self.active.name)
+        active = self.active
+        target_index = self.target_index
+
+        def current():
+            return (self._playback_request["id"] == request_id
+                    and self._playback_request["state"] == "starting"
+                    and self.active is active and self.target_index == target_index)
+
+        def start():
+            if not current():
+                return {"error": "Playback request superseded"}
+            return active.start(path, items, self.auto_next, resume, audio, sub)
 
         def done(res):
+            if not current():
+                return
             self._casting = False
+            self._poll_generation += 1
             if res != "playing":
                 if self.target == "cast":
                     history.clear_current()
-                self._message = str(res)
-                self._status(str(res))
-            elif self.target == "cast":
-                self._interrupted_playback = None
-                history.clear_interrupted()
+                message = str(res.get("error", res)) if isinstance(res, dict) else str(res)
+                self._playback_request.update(state="failed", error=message)
+                self._message = message
+                self._status(message)
+            else:
+                self._confirmation_deadline = time.monotonic() + self.PLAYBACK_CONFIRM_TIMEOUT
             self._changed()
             self.poll_cast()
-        self._run(lambda: self.active.start(path, items, self.auto_next, resume, audio, sub), done)
-        self._run(lambda: probe.probe(path), lambda r: self._probe_done(path, r))
+        self._run(start, done)
+        self._run(lambda: probe.probe(path),
+                  lambda r: self._probe_done(path, r)
+                  if self._playback_request["id"] == request_id else None)
         return True
+
+    def _cancel_playback_request(self, message):
+        self._poll_generation += 1
+        self._confirmation_deadline = None
+        if self._playback_request and self._playback_request["state"] in ("accepted", "starting"):
+            self._playback_request.update(state="failed", error=message)
+            self._casting = False
+
+    def _playback_accepted(self):
+        request = self._playback_request
+        if request is None:
+            return {"ok": False, "error": "No playback request accepted"}
+        if request and request["state"] == "failed":
+            return {"ok": False, "request_id": request["id"], "state": "failed",
+                    "error": request["error"]}
+        return {"ok": True, "request_id": request["id"], "state": "accepted"}
 
     def _probe_done(self, path, res):
         if path != self._now_path:       # cast failed or moved on -> no stale controls
@@ -296,6 +345,7 @@ class Engine:
     def stop(self):
         if self._observer_blocked():
             return
+        self._cancel_playback_request("Playback start cancelled by Stop")
         if self.target == "cast":
             self._interrupted_playback = None
             history.clear_interrupted()
@@ -363,13 +413,17 @@ class Engine:
         self._changed()
 
     def shutdown(self):
+        self._cancel_playback_request("Playback start cancelled: controller closed")
         self.remember()
         for t in self.targets.values():
             t.shutdown()                 # cast: kill the server; vlc: leave it running
 
     # ---- polling ----
     def poll_cast(self):
-        self._run(self.active.status, self._poll_done)
+        generation = self._poll_generation
+        self._run(self.active.status,
+                  lambda result: self._poll_done(result)
+                  if generation == self._poll_generation else None)
 
     def _poll_done(self, st):
         if not isinstance(st, dict):
@@ -441,6 +495,14 @@ class Engine:
         self._np_playing = self._np_state in ("PLAYING", "")
         if self._np_state == "PLAYING":
             self._saw_playing = True
+            if (not self._casting and self._playback_request
+                    and (self._playback_request["state"] == "starting"
+                         or self._playback_request.get("error_code") == "confirmation_timeout")):
+                self._playback_request.update(state="playing", error=None, error_code=None)
+                self._confirmation_deadline = None
+                if self.target == "cast":
+                    self._interrupted_playback = None
+                    history.clear_interrupted()
         if (self._recovered_cast_session and not self._startup_recast_attempted
                 and self._np_state == "PLAYING" and self._now_path):
             # The previous app owned the local HTTP stream. Re-open it from the
@@ -462,6 +524,14 @@ class Engine:
 
     def tick(self):
         """Advance the displayed position one second between polls (smooth clock)."""
+        if (self._confirmation_deadline is not None
+                and time.monotonic() >= self._confirmation_deadline):
+            self._confirmation_deadline = None
+            message = "Playback was not confirmed by the receiver in time"
+            self._playback_request.update(state="failed", error=message,
+                                          error_code="confirmation_timeout")
+            self._status(message)
+            self._changed()
         if self._np_playing and (self.now_live or self._np_dur > 0):
             if not self.now_live and self._np_dur:
                 self._np_pos = min(self._np_pos + 1, self._np_dur)
@@ -528,6 +598,7 @@ class Engine:
             "targets": targets,
             "sources": sources,
             "auto_next": self.auto_next,
+            "playback_request": dict(self._playback_request) if self._playback_request else None,
             "interrupted": (self._interrupted_playback
                             if self.target == "cast" and self._receiver_idle
                             and not self._casting and not self._cast_observer() else None),
@@ -592,9 +663,12 @@ class Engine:
                 path = p.get("path", "")
                 if (path.lower().endswith(tuple(g[1:] for g in VIDEO_GLOBS))
                         and web_path_ok(path)):
-                    self.cast(path, int(p.get("resume", 0) or 0))
+                    if not self.cast(path, int(p.get("resume", 0) or 0)):
+                        return {"ok": False, "error": self._message or "Playback not allowed"}
+                    return self._playback_accepted()
                 else:
                     log.warning("web cast refused (outside sources): %s", path)
+                    return {"ok": False, "error": "Media is unavailable or outside configured sources"}
             elif kind == "forget":
                 history.forget(p.get("path", ""))
                 if (self._interrupted_playback
@@ -629,4 +703,4 @@ class Engine:
             return {"ok": False, "error": "Interrupted media is missing or outside configured sources"}
         if not self.cast(entry["path"], entry["pos"]):
             return {"ok": False, "error": self._message or "Could not resume playback"}
-        return {"ok": True}
+        return self._playback_accepted()

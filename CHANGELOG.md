@@ -7,6 +7,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Playback request IDs and explicit accepted/starting/playing/failed feedback in
+  the API, desktop, and phone remote. Playing requires fresh receiver confirmation;
+  launch errors persist and confirmation timeouts never retry commands.
+- A real-hardware recovery checklist for direct Cast, remux, transcode, and paused
+  receivers before v0.5.0.
 - Connected desktops offer explicit recovery of known interrupted Cast playback
   after server outages, with persisted checkpoints and stale-request protection
   across multiple clients. Dismissing the non-modal prompt never starts playback.
@@ -19,6 +24,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   disconnect/reconnect behavior, and client shutdown safety.
 
 ### Fixed
+- Superseded launch callbacks, queued launches after cancellation, and stale
+  status responses cannot overwrite the latest playback request result.
+- Interrupted recovery checkpoints are retained until playback is confirmed.
 - Failed Cast status requests no longer count as confirmed idle playback.
 - Failed startup reattachment preserves a checkpoint for explicit manual recovery.
 - Direct Cast resumes now include the saved position in the initial load

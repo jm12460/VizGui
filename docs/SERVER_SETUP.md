@@ -113,7 +113,7 @@ time you deliberately start or restart it.
   is unchanged, and the file still belongs to a configured source. Two clients
   cannot launch the same recovery simultaneously. Failed requests are never
   replayed automatically. A failed launch retains the checkpoint for manual
-  retry; a successful Cast launch, Stop, or removing its history clears it.
+  retry; confirmed Cast playback, Stop, or removing its server history clears it.
 - A TV status failure is treated as unknown, not confirmed idle, so it cannot
   itself trigger the recovery prompt. A checkpoint is created only from the
   saved current-session identity and its unfinished history entry, never by
@@ -126,3 +126,35 @@ time you deliberately start or restart it.
 Automated recovery tests use temporary history files, fake Cast processes, and
 no TV or live service. Receiver timing, codecs, SMB availability, and recovery
 across real server outages still require hardware validation.
+
+## Playback request feedback
+
+Playback commands and interrupted-session recovery return `ok`, `request_id`,
+and `state: "accepted"` when queued successfully. Acceptance does not mean the
+TV has started playing. The status API exposes the latest launch under
+`playback_request`, with its ID, title, state, and any error:
+
+| State | Meaning |
+| --- | --- |
+| `accepted` | The command reply acknowledges the request. |
+| `starting` | Launch is queued/running, or awaiting playback confirmation. |
+| `playing` | A fresh receiver/player status confirmed playback after launch. |
+| `failed` | Availability/launch failed, a pending launch was cancelled, or playback was not confirmed in time. |
+
+Desktop and phone interfaces display starting and failure details. Failure
+information persists through later polls until another request replaces it.
+The last request's result is separate from current transport state: pausing or
+ending a successfully launched episode does not retroactively fail its launch.
+
+After a launcher reports success, VizGui allows 45 seconds for playback
+confirmation. A timeout reports `error_code: "confirmation_timeout"`; it never
+retries the command or restarts playback automatically. If that same request is
+subsequently confirmed playing, status is updated to reflect the actual result.
+Recovery checkpoints are cleared only after playback is confirmed, not merely
+because a launcher process is alive. Superseded launch callbacks and status
+responses from before launch completion cannot overwrite the current result.
+
+Older clients can continue checking `ok`; older servers without
+`playback_request` remain supported by updated desktop and phone renderers.
+See [the hardware recovery checklist](RECOVERY_HARDWARE_TESTS.md) for validation
+that still needs a real TV and desktop/phone clients.

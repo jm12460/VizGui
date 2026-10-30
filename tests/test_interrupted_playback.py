@@ -83,7 +83,10 @@ def test_resume_requires_current_checkpoint_and_target(recovery):
     for checkpoint, target in (("stale", 0), (entry["id"], 1), (entry["id"], True)):
         assert e.resume_interrupted(checkpoint, target)["ok"] is False
     assert pending == []
-    assert e.resume_interrupted(entry["id"], 0) == {"ok": True}
+    accepted = e.resume_interrupted(entry["id"], 0)
+    assert accepted["ok"] is True
+    assert accepted["state"] == "accepted"
+    assert accepted["request_id"] == e.web_status()["playback_request"]["id"]
     assert e._resume_base == 420
     assert e._now_path == str(media)
     assert e.web_status()["interrupted"] is None
@@ -92,6 +95,8 @@ def test_resume_requires_current_checkpoint_and_target(recovery):
     fn, done = pending.pop(0)
     done(fn())
     e.active.start.assert_called_once_with(str(media), [str(media)], False, 420, None, None)
+    assert history.interrupted() == entry  # keep until receiver confirms playback
+    e._poll_done({"idle": False, "state": "PLAYING", "pos": 420, "dur": 1200})
     assert history.interrupted() is None
 
 

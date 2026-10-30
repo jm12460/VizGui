@@ -4,8 +4,10 @@ Where vizgui is headed: from a working single-user Linux app to something
 **anyone can download and use, cross-platform, with ease-of-use and
 functionality out of the box.**
 
-Current status: **v0.4.1** · Linux daily-driven, with an optional headless
-server, connected GUI, and desktop appearance scaling · 226 passing tests.
+Current release: **v0.4.1** · Linux daily-driven, with an optional headless
+server, connected GUI, and desktop appearance scaling. Development on `main`
+now has **402 passing tests** (full isolated run: 2026-10-30), with reconnect,
+interrupted-playback recovery, and explicit playback-request feedback.
 Windows/macOS backends are still untested on hardware. `install.sh` supports
 pacman/apt/dnf; AUR recipes are ready, but publication remains blocked.
 
@@ -25,7 +27,7 @@ noting because they make the cross-platform work *additive* instead of a rewrite
 - [x] **Playback-engine extraction** (`vizgui/playback/` — `PlaybackTarget`
       contract + `CastTarget`/`VlcTarget` adapters); a new target (e.g. DLNA) is
       a self-contained file
-- [x] Automated test suite (226 tests, including offscreen Qt checks;
+- [x] Automated test suite (402 tests, including offscreen Qt and isolated HTTP checks;
       real hardware testing is still needed)
 - [x] Reliability pass (status bar, startup health check, graceful
       tool-missing handling)
@@ -64,15 +66,21 @@ plan reflects reality:
 
 Focus on reliability and playback ownership before expanding the feature set.
 
-- [ ] **Server disconnect recovery:** handle temporary network failures,
-      server restarts, and reconnection without interrupting active playback.
-- [ ] **Multiple connected clients:** verify that two desktop clients and the
-      phone remote can observe and control one server-owned playback session
-      without conflicting state.
+- [ ] **Server disconnect recovery:** GUI reconnection and explicit interrupted
+      playback recovery are implemented; complete the real-device recovery matrix.
+      GUI disconnects leave playback alone; server outages may interrupt streams.
+- [x] **Multiple connected clients:** isolated tests cover two desktops and the
+      phone API sharing one session, concurrent commands, and stale recovery
+      requests. Basic real-device controls and client lifecycle were also checked.
 - [ ] **Playback ownership boundaries:** audit Cast/VLC ownership and prevent
       standalone or disconnected clients from taking over server playback.
-- [ ] **Integration and regression tests:** test client lifecycle, shutdown,
-      reconnects, and failure paths beyond the existing unit coverage.
+- [x] **Integration and regression tests:** cover client lifecycle, shutdown,
+      reconnects, and direct/remux/transcode restart recovery with fake devices.
+- [x] **Explicit playback-request results:** accepted acknowledgements, starting
+      feedback, receiver-confirmed playing, and persistent failures across clients.
+- [ ] **Real-hardware recovery matrix:** test direct Cast, remux, and transcode
+      separately, including paused receivers, expired buffers, network outages,
+      and launch failures. See [the checklist](docs/RECOVERY_HARDWARE_TESTS.md).
 - [ ] **KDE/Hyprland validation:** verify application identity, launcher icons,
       and appearance preferences across real desktop environments.
 

@@ -413,6 +413,18 @@ class MainWindow(QMainWindow):
         self.b_audio.setVisible(len(audio) > 1)
         self.b_subs.setVisible(bool(subs))
         self.b_chapters.setVisible(bool(chapters))
+        request = status.get("playback_request") or {}
+        if request.get("state") in ("accepted", "starting"):
+            self.np_title.setText(f"Starting: {request.get('title') or 'playback'}…")
+            self.np_badge.hide()
+            self.np_bar.setRange(0, 0)
+            self.np_time.setText("Waiting for playback confirmation")
+        elif request.get("state") == "failed":
+            self.np_title.setText(f"Playback failed: {request.get('title') or 'media'}")
+            self.np_badge.hide()
+            self.np_bar.setRange(0, 1000)
+            self.np_bar.setValue(0)
+            self.np_time.setText(request.get("error") or "Could not start playback")
 
     # ---- connected-mode playback history and track selection ----
     def _remote_play(self, path):
@@ -1217,7 +1229,18 @@ class MainWindow(QMainWindow):
                 (e._tv_text or "TV: …") if config.HOST
                 else "No SmartCast TV configured")
             return
-        if e._message:
+        request = e._playback_request or {}
+        if request.get("state") == "failed":
+            self.np_title.setText(f"Playback failed: {request.get('title') or 'media'}")
+            self.np_badge.hide()
+            self.np_bar.setRange(0, 1000); self.np_bar.setValue(0)
+            self.np_time.setText(request.get("error") or "Could not start playback")
+        elif request.get("state") in ("accepted", "starting"):
+            self.np_title.setText(f"Starting: {request.get('title') or 'playback'}…")
+            self.np_badge.hide()
+            self.np_bar.setRange(0, 0)
+            self.np_time.setText("Waiting for playback confirmation")
+        elif e._message:
             self.np_title.setText(e._message)
             self.np_badge.hide()
             self.np_bar.setRange(0, 0); self.np_time.setText("")

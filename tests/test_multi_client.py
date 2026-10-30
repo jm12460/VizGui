@@ -410,3 +410,42 @@ def test_stale_checkpoint_is_rejected_by_http_without_device_io(session, tmp_pat
         session.first.command_for_server(identity, "resume_interrupted", id="stale", target_index=0)
     assert session.device.operations == []
     assert session.second.connection_status()["interrupted"] == checkpoint
+
+
+def wait_for_request(client, state):
+    deadline = time.monotonic() + 3
+    while True:
+        request = client.connection_status()["playback_request"]
+        if request and request["state"] == state:
+            return request
+        assert time.monotonic() < deadline, request
+
+
+def test_recovery_acknowledgement_is_separate_from_confirmed_playback(session, tmp_path):
+    path, checkpoint = prepare_interrupted_session(session, tmp_path)
+    identity = session.first.connection_status()["server"]
+    reply = session.first.command_for_server(identity, "resume_interrupted",
+                                            id=checkpoint["id"], target_index=0)
+    assert reply["ok"] is True
+    assert reply["state"] == "accepted"
+    request = wait_for_request(session.second, "playing")
+    assert request["id"] == reply["request_id"]
+    assert request["title"] == path.name
+    assert request == session.phone()["playback_request"]
+    assert session.device.operations == [("start", str(path), 120)]
+
+
+def test_accepted_http_launch_failure_is_visible_to_all_clients_without_retries(
+        session, tmp_path, monkeypatch):
+    path, _ = prepare_interrupted_session(session, tmp_path)
+    launch = Mock(return_value="Test device launch failed")
+    monkeypatch.setattr(session.device, "start", launch)
+    reply = session.phone("/api/cmd", {"kind": "cast", "path": str(path), "resume": 120})
+    assert reply["ok"] is True
+    assert reply["state"] == "accepted"
+    request = wait_for_request(session.first, "failed")
+    assert request["id"] == reply["request_id"]
+    assert request["error"] == "Test device launch failed"
+    assert request == session.second.connection_status()["playback_request"]
+    assert request == session.phone()["playback_request"]
+    launch.assert_called_once()
