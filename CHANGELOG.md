@@ -7,6 +7,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- The connected server-folder dialog opens wider and includes a non-modal folder
+  picker alongside the editable path field; the server still validates the path.
 - Connected desktops on the server computer can add local and SMB sources or
   remove sources through a same-user Linux Unix socket without restarting playback.
   Phone tokens cannot administer sources, saved SMB credentials are not returned,

@@ -6,7 +6,7 @@ functionality out of the box.**
 
 Current release: **v0.4.1** · Linux daily-driven, with an optional headless
 server, connected GUI, and desktop appearance scaling. The development checkout
-now has **431 passing tests** (full isolated run: 2026-10-30), with reconnect,
+now has **432 passing tests** (full isolated run: 2026-10-30), with reconnect,
 interrupted-playback recovery, and explicit playback-request feedback.
 Windows/macOS backends are still untested on hardware. `install.sh` supports
 pacman/apt/dnf; AUR recipes are ready, but publication remains blocked.
@@ -27,7 +27,7 @@ noting because they make the cross-platform work *additive* instead of a rewrite
 - [x] **Playback-engine extraction** (`vizgui/playback/` — `PlaybackTarget`
       contract + `CastTarget`/`VlcTarget` adapters); a new target (e.g. DLNA) is
       a self-contained file
-- [x] Automated test suite (431 tests, including offscreen Qt and isolated HTTP checks;
+- [x] Automated test suite (432 tests, including offscreen Qt and isolated HTTP checks;
       real hardware testing is still needed)
 - [x] Reliability pass (status bar, startup health check, graceful
       tool-missing handling)

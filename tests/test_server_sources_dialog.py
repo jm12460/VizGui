@@ -148,3 +148,36 @@ def test_lost_mutation_response_is_not_claimed_to_have_failed(dialog):
     assert "Could not confirm change" in window.status.text()
     assert "Still offline" in window.status.text()
     assert not window.add_folder.isEnabled()
+
+
+def test_folder_picker_selects_path_without_saving_until_confirmed(dialog, tmp_path):
+    from PySide6.QtWidgets import QPushButton
+    window, controller, pending = dialog
+    window.refresh()
+    finish(pending, response())
+    window._add_folder()
+    child = window._popup_dialogs[-1]
+    assert child.width() >= 560
+    fields = child.findChildren(QLineEdit)
+    fields[1].setText("/manual/path")
+    browse = next(button for button in child.findChildren(QPushButton) if button.text() == "Browse…")
+    browse.click()
+    picker = child._popup_dialogs[-1]
+    assert not picker.isModal() and not picker.isSizeGripEnabled()
+    picker.reject()
+    assert fields[1].text() == "/manual/path"
+    browse.click()
+    picker = child._popup_dialogs[-1]
+    folder = tmp_path / "server folder"
+    folder.mkdir()
+    picker.setDirectory(str(folder))
+    picker.accept()
+    assert fields[1].text() == str(folder)
+    assert fields[0].text() == ""  # server supplies the default name
+    assert pending == []
+    child.accept()
+    fn, _ = pending.pop(0)
+    controller.client.manage_sources.return_value = response(1)
+    fn()
+    assert controller.client.manage_sources.call_args.kwargs["source"] == {
+        "kind": "local", "name": "", "path": str(folder)}

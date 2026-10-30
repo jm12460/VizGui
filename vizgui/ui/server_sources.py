@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout, QHBoxLayo
                                QLabel, QLineEdit, QListWidget, QPushButton, QVBoxLayout)
 
 from ..qtasync import run_async
-from ..qtpopups import confirm, show_dialog
+from ..qtpopups import confirm, directory_input, show_dialog
 from .dialogs import SmbDialog
 
 
@@ -164,11 +164,17 @@ class ServerSourcesDialog(QDialog):
         context = self._context()
         dialog = QDialog(self)
         dialog.setWindowTitle("Add server folder")
+        dialog.resize(560, 170)
         form = QFormLayout(dialog)
         name, path = QLineEdit(), QLineEdit()
         path.setPlaceholderText("/absolute/path/on/server")
         form.addRow("Name (optional):", name)
-        form.addRow("Server folder:", path)
+        folder_row = QHBoxLayout()
+        folder_row.addWidget(path, 1)
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(lambda: directory_input(dialog, path.setText))
+        folder_row.addWidget(browse)
+        form.addRow("Server folder:", folder_row)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)

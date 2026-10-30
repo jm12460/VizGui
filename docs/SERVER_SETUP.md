@@ -96,7 +96,11 @@ open **Sources** to add an absolute server folder or SMB share, or remove a
 source. Changes apply to the running server and appear in connected clients
 without a restart. Removing a source does not delete its files, unmount a share,
 or stop current playback. A folder path is interpreted and checked on the
-server; it is not a path on a separate desktop.
+server; it is not a path on a separate desktop. The folder picker browses the
+local desktop filesystem because administration requires the same machine and
+OS user. The path remains editable and the server validates it before saving,
+including when containers or mount namespaces differ. A blank name defaults to
+the selected folder name.
 
 Source administration uses a private Unix socket in the user's runtime
 directory, verifies the connecting OS user and current server instance, and
