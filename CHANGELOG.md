@@ -7,6 +7,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- A service-file renderer validates Python/module paths for source-checkout and
+  installed-package setups without installing or controlling a service.
+- Server setup/recovery instructions and isolated restart-recovery tests for
+  direct Cast, remux, and transcode, including pause, failure, and shutdown safety.
 - Isolated multi-client integration tests for two desktops and the phone API
   sharing one headless playback session, including concurrent commands,
   disconnect/reconnect behavior, and client shutdown safety.

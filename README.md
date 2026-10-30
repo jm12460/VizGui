@@ -26,9 +26,10 @@ VizGui can run without a desktop window:
 Configure a Chromecast target and enable the phone remote in the desktop
 setup wizard first.
 
-For persistent playback on Linux, a sample systemd user service is provided
-at `packaging/vizgui-server.service`. Check its Python executable path before
-installing and enabling it.
+For persistent playback on Linux, see [server setup and recovery](docs/SERVER_SETUP.md).
+The service renderer checks your selected Python and generates the correct unit
+for a source checkout or installed package. Service installation and restarts
+are separate manual steps; the app installer/updater never controls the service.
 
 When a server is detected, the desktop offers:
 
@@ -164,7 +165,10 @@ Settings live in `~/.config/vizgui/config.json` (chmod 600); logs in `~/.cache/v
 ```
 pytest            # requires pytest (e.g. `sudo pacman -S python-pytest`)
 ```
-Pure-logic unit tests in `tests/` (no GUI/network/hardware): status & cast
+Tests in `tests/` use fake playback devices and temporary state, including
+offscreen Qt checks, isolated loopback HTTP integration tests, service generation,
+and direct/remux/transcode restart recovery. No real TV or live service is used.
+Coverage includes status & cast
 planning, Cast-device discovery, continue-watching + active-cast recovery, the
 media probe (audio/subtitle/chapter parsing), config, the playback targets &
 media helpers, VLC/MPRIS/Chromecast parsing, the transcode & subtitle-burn

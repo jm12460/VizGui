@@ -5,8 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Install vizgui into the Python environment used by this command.
-# For a venv, replace /usr/bin/python with /path/to/venv/bin/python.
+# This template is for VizGui installed into the selected Python environment.
+# Source checkouts also require WorkingDirectory=/absolute/path/to/vizgui.
+# Use render_server_service.py to check paths and generate either variant.
+# For a venv, select its own Python executable, not the system interpreter.
 ExecStart=/usr/bin/python -m vizgui.server --no-print-pin
 Restart=on-failure
 RestartSec=5
