@@ -15,7 +15,7 @@ from .. import platforms
 from .. import health
 from ..paths import GC, CACHE, CASTER_LOG, log
 from ..chromecast import gc
-from ..transcode import write_wrapper, prepare_subtitle, encoder_name
+from ..transcode import write_wrapper, prepare_subtitle, encoder_name, can_tonemap
 from ..helpers import cast_plan, parse_status
 from ..vlc import (vlc_cmd, vlc_status, vlc_any_status, vlc_playlist_path,
                    mpris_cmd, mpris_running, path_to_uri, VLC_PORT, VLC_PW)
@@ -73,7 +73,9 @@ class CastTarget(PlaybackTarget):
             plan = "remux"         # selecting a non-default audio needs a re-map
         if max_height == 1080:
             plan = "transcode"     # a remembered compatibility choice must actually scale
-        dimensions = media.video_size(path) if plan == "transcode" and max_height is None else None
+        info = media.video_info(path) if plan == "transcode" else None
+        dimensions = info["size"] if info and max_height is None else None
+        hdr = info["hdr"] if info else None
         can_fallback = bool(dimensions and (dimensions[0] > 1920 or dimensions[1] > 1080))
         host = self._fallback_sender_host()
         ready = None
@@ -120,11 +122,14 @@ class CastTarget(PlaybackTarget):
                             "audio": audio, "sub": sub_desc}
             if max_height is not None:
                 wrapper_args["max_height"] = max_height
+            if hdr:
+                wrapper_args["hdr"] = hdr
             wrapper = write_wrapper(path, **wrapper_args)
             self.handle = platforms.launch_caster(
                 base + ["transcode", "--content-type", "video/mp4", "--command", wrapper],
                 log_path=CASTER_LOG)
-            what = "live remux" if plan == "remux" else f"live transcode ({encoder_name()})"
+            tone = ", HDR to SDR" if hdr and can_tonemap() else ""
+            what = "live remux" if plan == "remux" else f"live transcode ({encoder_name()}{tone})"
         launched = time.monotonic()
         log.info("Cast launch timing: prepare_stop=%.2fs wait_idle=%.2fs launch=%.2fs",
                  stopped - started, idle - stopped, launched - idle)

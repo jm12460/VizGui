@@ -38,6 +38,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   disconnect/reconnect behavior, and client shutdown safety.
 
 ### Fixed
+- HDR (HDR10/PQ and HLG) sources cast through a live transcode are now
+  tone-mapped to SDR BT.709 instead of looking washed out. In the 1080p
+  compatibility mode the video is scaled before tone mapping, and image
+  subtitles are scaled with it. Needs ffmpeg's zscale filter (zimg); without
+  it, playback continues untone-mapped and the log says so.
 - Cancel a pending Cast launch as soon as Stop is requested, including while
   media preparation or the receiver handoff is still in progress.
 - Reject receiver playback confirmation when it can be identified as a

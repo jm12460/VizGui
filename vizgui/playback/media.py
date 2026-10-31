@@ -5,23 +5,44 @@ import json
 import re
 import subprocess
 
+from .. import platforms
 from ..paths import CACHE, VIDEO_GLOBS
 
 _EXTS = tuple(g[1:] for g in VIDEO_GLOBS)   # (".mp4", ".mkv", ...)
 
 
-def video_size(path):
-    """Return first-video dimensions, or None when probing is inconclusive."""
+# Transfer characteristics of HDR video: PQ (HDR10, HDR10+, Dolby Vision 8.1's
+# base layer) and HLG. Dolby Vision profile 5 has no HDR10 base and isn't covered.
+HDR_TRANSFERS = ("smpte2084", "arib-std-b67")
+
+
+def video_info(path):
+    """First video stream as ``{"size": (w, h) or None, "hdr": transfer or None}``,
+    from one ffprobe call; None when probing fails. ``hdr`` names the PQ/HLG
+    transfer of HDR video and is None for SDR."""
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-             "stream=width,height", "-of", "json", path],
+            [platforms.find_tool("ffprobe"), "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height,color_transfer", "-of", "json", path],
             capture_output=True, text=True, timeout=10, check=True)
         stream = json.loads(result.stdout)["streams"][0]
-        width, height = int(stream["width"]), int(stream["height"])
-        return (width, height) if width > 0 and height > 0 else None
+        if not isinstance(stream, dict):
+            return None
     except (OSError, ValueError, TypeError, KeyError, IndexError, subprocess.SubprocessError):
         return None
+    try:
+        width, height = int(stream["width"]), int(stream["height"])
+        size = (width, height) if width > 0 and height > 0 else None
+    except (KeyError, TypeError, ValueError):
+        size = None
+    transfer = stream.get("color_transfer")
+    return {"size": size, "hdr": transfer if transfer in HDR_TRANSFERS else None}
+
+
+def video_size(path):
+    """Return first-video dimensions, or None when probing is inconclusive."""
+    info = video_info(path)
+    return info["size"] if info else None
 
 
 def vcodec(path):
