@@ -92,3 +92,21 @@ def test_superseded_preparation_does_not_stop_or_replace_cast(tmp_path, monkeypa
     owner.cleanup.assert_called_once()
     target.handle.terminate.assert_not_called()
     cast_command.assert_not_called()
+
+
+def test_cancel_during_handoff_does_not_launch_new_caster(tmp_path, monkeypatch):
+    source = tmp_path / 'episode.mkv'
+    source.write_bytes(b'episode')
+    owner = Mock()
+    target = targets.CastTarget()
+    monkeypatch.setattr(targets.media, 'vcodec', lambda _: 'h264')
+    monkeypatch.setattr(targets.prepared, 'prepare', lambda *_: (owner, '/tmp/prepared.mp4'))
+    monkeypatch.setattr(targets, 'gc', lambda *args, **kwargs: (True, ''))
+    monkeypatch.setattr(target, '_wait_idle', lambda: None)
+    launch = Mock()
+    monkeypatch.setattr(targets.platforms, 'launch_caster', launch)
+    checks = iter((True, False))
+    result = target.start_guarded(str(source), [str(source)], False, current=lambda: next(checks))
+    assert result == {'error': 'Playback request superseded'}
+    launch.assert_not_called()
+    owner.cleanup.assert_called_once()

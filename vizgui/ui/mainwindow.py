@@ -428,7 +428,8 @@ class MainWindow(QMainWindow):
             self.np_title.setText(f"Starting: {request.get('title') or 'playback'}…")
             self.np_badge.hide()
             self.np_bar.setRange(0, 0)
-            self.np_time.setText("Waiting for playback confirmation")
+            self.np_time.setText("Trying 1080p compatibility…" if request.get("compatibility_mode")
+                                 else "Waiting for playback confirmation")
         elif request.get("state") == "failed":
             self.np_title.setText(f"Playback failed: {request.get('title') or 'media'}")
             self.np_badge.hide()
@@ -1266,7 +1267,8 @@ class MainWindow(QMainWindow):
             self.np_title.setText(f"Starting: {request.get('title') or 'playback'}…")
             self.np_badge.hide()
             self.np_bar.setRange(0, 0)
-            self.np_time.setText("Waiting for playback confirmation")
+            self.np_time.setText("Trying 1080p compatibility…" if request.get("compatibility_mode")
+                                 else "Waiting for playback confirmation")
         elif e._message:
             self.np_title.setText(e._message)
             self.np_badge.hide()

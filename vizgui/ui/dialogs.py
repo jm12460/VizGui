@@ -337,8 +337,11 @@ class SetupDialog(QDialog):
         """Add a discovered Cast device if not already a target. -> added?"""
         if any(t.get("type") == "cast" and t.get("addr") == d["addr"] for t in self.targets):
             return False
-        self.targets.append({"type": "cast", "name": d["name"], "addr": d["addr"],
-                             "cast_port": d.get("cast_port", "8009")})
+        target = {"type": "cast", "name": d["name"], "addr": d["addr"],
+                  "cast_port": d.get("cast_port", "8009")}
+        if isinstance(d.get("uuid"), str) and d["uuid"]:
+            target["uuid"] = d["uuid"]
+        self.targets.append(target)
         return True
 
     def _autoscan(self):

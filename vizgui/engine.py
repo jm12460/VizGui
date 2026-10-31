@@ -18,6 +18,7 @@ import secrets
 import time
 
 from . import config
+from . import cast_compatibility
 from . import history
 from . import probe
 from .config import save_config
@@ -60,6 +61,10 @@ class Engine:
         self._casting = False            # True from request until the launch finishes
         self._playback_request = None
         self._launch_started_at = None
+        self._launch_generation = 0
+        self._fallback_buffer = None
+        self._fallback_disallowed = False
+        self._compatibility_key = None
         self._sources_revision = 0
         self._poll_generation = 0
         self._confirmation_deadline = None
@@ -201,17 +206,27 @@ class Engine:
             pass
         self._changed()
 
-    def cast(self, path, resume=0, audio=None, sub=None):
+    def cast(self, path, resume=0, audio=None, sub=None, *, _compatibility=False, _request_id=None):
         if self._observer_blocked():
             return False
         self._network_recovery = None
         self._receiver_content_id = None
         self._receiver_content_conflict = False
         self._receiver_confirmed_position = None
-        request_id = secrets.token_hex(8)
+        targets = config.CFG.get("targets", [])
+        target = targets[self.target_index] if 0 <= self.target_index < len(targets) else None
+        self._compatibility_key = cast_compatibility.media_key(target, path) if self.target == "cast" else None
+        _compatibility = _compatibility or cast_compatibility.remembered(self._compatibility_key)
+        request_id = _request_id or secrets.token_hex(8)
         title = os.path.basename(path.rstrip(os.sep)) or path
         self._playback_request = {"id": request_id, "state": "accepted",
                                   "title": title, "error": None, "error_code": None}
+        if _compatibility:
+            self._playback_request["compatibility_mode"] = "1080p"
+        self._fallback_buffer = None
+        self._fallback_disallowed = False
+        self._launch_generation += 1
+        launch_generation = self._launch_generation
         self._launch_started_at = time.monotonic()
         self._confirmation_deadline = None
         self._poll_generation += 1
@@ -251,6 +266,7 @@ class Engine:
 
         def current():
             return (self._playback_request["id"] == request_id
+                    and self._launch_generation == launch_generation
                     and self._playback_request["state"] == "starting"
                     and self.active is active and self.target_index == target_index)
 
@@ -258,8 +274,11 @@ class Engine:
             if not current():
                 return {"error": "Playback request superseded"}
             if callable(getattr(type(active), "start_guarded", None)):
+                options = {"current": current}
+                if _compatibility:
+                    options["max_height"] = 1080
                 return active.start_guarded(path, items, self.auto_next, resume, audio, sub,
-                                            current=current)
+                                            **options)
             return active.start(path, items, self.auto_next, resume, audio, sub)
 
         def done(res):
@@ -281,7 +300,8 @@ class Engine:
         self._run(start, done)
         self._run(lambda: probe.probe(path),
                   lambda r: self._probe_done(path, r)
-                  if self._playback_request["id"] == request_id else None)
+                  if (self._playback_request["id"] == request_id
+                      and self._launch_generation == launch_generation) else None)
         return True
 
     def _cancel_playback_request(self, message):
@@ -332,6 +352,7 @@ class Engine:
     def jump_to(self, secs):
         if self._observer_blocked():
             return
+        self._fallback_disallowed = True
         """Jump to an absolute time (chapter). A live stream can't seek, so restart
         it at the offset; direct cast and VLC seek in place."""
         secs = int(secs)
@@ -343,6 +364,7 @@ class Engine:
     def go_next(self):
         if self._observer_blocked():
             return
+        self._fallback_disallowed = True
         if self.active.native_skip():
             self._run(lambda: self.active.skip(1), lambda _: self.poll_cast())
         elif self._now_path:
@@ -353,6 +375,7 @@ class Engine:
     def go_prev(self):
         if self._observer_blocked():
             return
+        self._fallback_disallowed = True
         if self.active.native_skip():
             self._run(lambda: self.active.skip(-1), lambda _: self.poll_cast())
         elif self._now_path:
@@ -396,6 +419,12 @@ class Engine:
             return
         """Run a transport action off-thread, then poll to refresh state."""
         self._network_recovery = None
+        self._fallback_disallowed = True
+        if (fn == self.stop and self._playback_request
+                and self._playback_request.get("state") in ("accepted", "starting")):
+            # Invalidate a worker that may still be preparing a cast before
+            # queuing the device Stop behind it.
+            self._cancel_playback_request("Playback start cancelled by Stop")
         if self.now_live and self._now_path and fn in (self.rewind, self.forward):
             offset = -30 if fn == self.rewind else 30
             self.jump_to(max(0, self._resume_base + self._np_pos + offset))
@@ -468,6 +497,7 @@ class Engine:
         if not isinstance(st, dict):
             return
         if self.target == "cast" and st.get("error"):
+            self._fallback_buffer = False
             if (not self._receiver_unreachable and not self._cast_observer()
                     and self._np_state == "PLAYING" and self._now_path
                     and not self._casting and self._receiver_content_id
@@ -487,6 +517,41 @@ class Engine:
             self._changed()
             return
         self._receiver_unreachable = False
+        request = self._playback_request or {}
+        if (not self._casting and self.target == "cast" and st.get("state") == "PLAYING"
+                and (request.get("state") == "starting"
+                     or request.get("error_code") == "confirmation_timeout")
+                and st.get("content_id")
+                and callable(getattr(type(self.active), "sender_matches_content", None))
+                and self.active.sender_matches_content(st["content_id"]) is False):
+            # A fresh poll may still describe a different receiver session.
+            return
+        if (not self._casting and request.get("compatibility_mode") == "1080p"
+                and (request.get("state") == "starting"
+                     or request.get("error_code") == "confirmation_timeout")
+                and st.get("state") == "PLAYING"):
+            content = st.get("content_id")
+            if (st.get("file") != "pipe_output" or not isinstance(content, str) or not content
+                    or not callable(getattr(type(self.active), "owns_buffering_content", None))
+                    or not self.active.owns_buffering_content(content)):
+                # A receiver can report another app's media after we launch.
+                # Never confirm this retry or discard its checkpoint on that basis.
+                return
+        if request.get("state") == "starting" and not self._casting:
+            content = st.get("content_id")
+            if (st.get("state") == "BUFFERING" and st.get("file") == "pipe_output"
+                    and isinstance(content, str) and content
+                    and callable(getattr(type(self.active), "owns_buffering_content", None))
+                    and self.active.owns_buffering_content(content)):
+                if self._fallback_buffer is None:
+                    self._fallback_buffer = {"content": content, "count": 1, "at": time.monotonic()}
+                elif self._fallback_buffer and self._fallback_buffer["content"] == content:
+                    self._fallback_buffer["count"] += 1
+                    self._fallback_buffer["at"] = time.monotonic()
+                else:
+                    self._fallback_buffer = False
+            elif not (self._fallback_buffer is None and st.get("idle") and st.get("busy")):
+                self._fallback_buffer = False
         recovery = self._network_recovery
         if recovery:
             if (st.get("idle") or st.get("content_id") != recovery["content_id"]
@@ -593,6 +658,11 @@ class Engine:
                     and (self._playback_request["state"] == "starting"
                          or self._playback_request.get("error_code") == "confirmation_timeout")):
                 self._playback_request.update(state="playing", error=None, error_code=None)
+                if (self._playback_request.get("compatibility_mode") == "1080p"
+                        and st.get("file") == "pipe_output" and st.get("content_id")
+                        and callable(getattr(type(self.active), "owns_buffering_content", None))
+                        and self.active.owns_buffering_content(st["content_id"])):
+                    cast_compatibility.remember(self._compatibility_key)
                 if self._launch_started_at is not None:
                     log.info("Cast playback confirmed %.2fs after request",
                              time.monotonic() - self._launch_started_at)
@@ -624,6 +694,20 @@ class Engine:
         if (self._confirmation_deadline is not None
                 and time.monotonic() >= self._confirmation_deadline):
             self._confirmation_deadline = None
+            request = self._playback_request or {}
+            candidate = self._fallback_buffer
+            if (request.get("state") == "starting" and not request.get("compatibility_mode")
+                    and self.target == "cast" and not self._cast_observer()
+                    and not self._casting and not self._receiver_unreachable
+                    and not self._fallback_disallowed and self._now_path
+                    and getattr(self.active, "_can_fallback_1080", False) is True
+                    and isinstance(candidate, dict) and candidate["count"] >= 2
+                    and time.monotonic() - candidate["at"] <= 10
+                    and self._np_state == "BUFFERING"):
+                self._status("4K playback did not start; trying 1080p compatibility")
+                self.cast(self._now_path, self._resume_base, audio=self._audio, sub=self._sub,
+                          _compatibility=True, _request_id=request["id"])
+                return
             message = "Playback was not confirmed by the receiver in time"
             self._playback_request.update(state="failed", error=message,
                                           error_code="confirmation_timeout")
@@ -719,8 +803,11 @@ class Engine:
             return
         targets = config.CFG.setdefault("targets", [])
         if not any(t.get("type") == "cast" and t.get("addr") == addr for t in targets):
-            targets.append({"type": "cast", "name": dev.get("name") or addr,
-                            "addr": addr, "cast_port": dev.get("cast_port") or "8009"})
+            target = {"type": "cast", "name": dev.get("name") or addr,
+                      "addr": addr, "cast_port": dev.get("cast_port") or "8009"}
+            if isinstance(dev.get("uuid"), str) and dev["uuid"]:
+                target["uuid"] = dev["uuid"]
+            targets.append(target)
             try:
                 save_config(config.CFG)
             except Exception as e:

@@ -224,3 +224,26 @@ def test_cast_status_failure_is_unknown_not_confirmed_idle():
         status = t.status()
     assert status["busy"] is True
     assert status["error"] == "connection refused"
+
+
+def test_4k_fallback_matches_only_running_sender_endpoint(monkeypatch):
+    t = targets.CastTarget()
+    t._fallback_host = '192.0.2.3'
+    t.handle = mock.Mock(poll=lambda: None, pid=123)
+    monkeypatch.setattr(targets.platforms, 'process_listens_on_port',
+                        lambda pid, port: (pid, port) == (123, 12345))
+    assert t.owns_buffering_content('http://192.0.2.3:12345/?media_file=pipe_output')
+    assert not t.owns_buffering_content('http://192.0.2.4:12345/?media_file=pipe_output')
+    assert not t.owns_buffering_content('http://192.0.2.3:12346/?media_file=pipe_output')
+    t.handle.poll = lambda: 0
+    assert not t.owns_buffering_content('http://192.0.2.3:12345/?media_file=pipe_output')
+
+
+def test_sender_verification_distinguishes_unknown_from_other_stream(monkeypatch):
+    t = targets.CastTarget()
+    t._fallback_host = '192.0.2.3'
+    t.handle = mock.Mock(poll=lambda: None, pid=123)
+    monkeypatch.setattr(targets.platforms, 'process_listens_on_port', lambda *_: None)
+    assert t.sender_matches_content('http://192.0.2.3:12345/video') is None
+    assert t.sender_matches_content('http://192.0.2.4:12345/video') is False
+    assert t.sender_matches_content('missing') is None

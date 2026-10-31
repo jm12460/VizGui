@@ -1,9 +1,8 @@
 # Recovery hardware checks before v0.5.0
 
 Automated tests use fake playback devices. These checks cover receiver timing,
-media delivery, and desktop/phone rendering on real hardware. They have not yet
-been verified as a complete matrix. Earlier informal checks confirmed basic
-multi-client control, GUI reconnection, and saved-position resumption.
+media delivery, and desktop/phone rendering on real hardware. The matrix is not
+complete; observations below record individual checks rather than a full pass.
 
 Choose test media and a time when playback may be interrupted. Stopping the
 server, disconnecting its network, or restarting it can stop Cast playback.
@@ -15,13 +14,32 @@ initial saved position, observed request states, recovered position, and any
 failure message for each case. Keep private media paths and tokens out of
 shared reports.
 
+Observations from October 30–31, 2026: a Linux headless server with NVIDIA
+encoding, connected desktop and phone, and a Vizio 4K TV with built-in Cast.
+The exact TV model and desktop environment were not recorded. Tests span
+`038d03c` and subsequent local changes, so they are not all verification of one
+identical build. Only one desktop and one phone participated in these checks.
+
 | Scenario | H.264 MP4 direct | H.264 MKV remux | HEVC transcode |
 | --- | --- | --- | --- |
-| Resume an interrupted episode after the receiver buffer expires | Pending | Pending | Pending |
-| Brief server restart while the receiver still reports playing | Pending | Pending | Pending |
-| Server restart while receiver is paused | Pending | Pending | Pending |
-| Temporary server/TV network interruption | Pending | Pending | Pending |
-| Launch failure or unavailable media | Pending | Pending | Pending |
+| Resume an interrupted episode after the receiver buffer expires | Observed | Observed | Observed |
+| Brief server restart while the receiver still reports playing | Observed | Observed | Observed |
+| Server restart while receiver is paused | Observed | Observed | Observed |
+| TV network interruption | Observed | Observed | Observed |
+| Server network interruption | Not tested | Not tested | Observed |
+| Launch failure or unavailable media | Not tested | Not tested | 4K black screen observed; 1080p fallback later played |
+
+In the expired-buffer tests, the resume point was where the server stopped, not
+where the receiver finished its remaining buffer. During later TV network-loss
+checks, a guarded stream restart resumed at the receiver-reported position.
+The desktop and phone both showed recovery prompts; Resume and Not now each
+cleared the other prompt in a separate check. The 4K-to-1080p choice was tested
+again through Continue Watching and after a server restart. These observations
+do not establish results for different receivers, VAAPI, or every failure mode.
+
+A separate temporary HLS prototype played on the same TV and sought into a
+previously ungenerated section; it is not integrated into VizGui. Continue the
+remaining checks with the actual application playback paths.
 
 For each playable case:
 

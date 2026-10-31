@@ -280,7 +280,7 @@ async function poll(){const seq=++pollSeq,d=await api('/api/status');if(seq!==po
  const request=d.playback_request||{};
  if(request.state==='accepted'||request.state==='starting'){
   $('np').textContent='Starting: '+(request.title||'playback')+'…';
-  $('badge').style.display='none';prog.style.width='0';tm.textContent='Waiting for playback confirmation';
+  $('badge').style.display='none';prog.style.width='0';tm.textContent=request.compatibility_mode?'Trying 1080p compatibility…':'Waiting for playback confirmation';
  }else if(request.state==='failed'){
   $('np').textContent='Playback failed: '+(request.title||'media');
   $('badge').style.display='none';prog.style.width='0';tm.textContent=request.error||'Could not start playback';
@@ -306,7 +306,7 @@ async function scanCast(){const box=$('devs');box.replaceChildren(msgDiv('Scanni
  box.replaceChildren();
  for(const v of devs){const b=document.createElement('button');b.textContent=`📺 ${v.name} (${v.addr})`;
   b.addEventListener('click',()=>addCast(v));box.appendChild(b);}}
-async function addCast(v){await cmd({kind:'addcast',name:v.name,addr:v.addr,cast_port:v.cast_port});setTimeout(poll,300);closeSettings();}
+async function addCast(v){await cmd({kind:'addcast',name:v.name,addr:v.addr,cast_port:v.cast_port,uuid:v.uuid});setTimeout(poll,300);closeSettings();}
 function pickSource(i){curSrc=+i;curSub="";closeSettings();tab('browse');}
 /* ---- browse ---- */
 async function loadSources(){const d=await api('/api/status');const s=$('source');

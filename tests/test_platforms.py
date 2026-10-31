@@ -3,6 +3,8 @@ import tempfile
 import types
 from unittest import mock
 
+import pytest
+
 from vizgui.platforms import linux, base
 
 
@@ -89,26 +91,160 @@ def test_base_defaults():
     assert base.lan_cidr("172.16.5.9") == "172.16.5.0/24"
 
 
-def test_linux_hw_encode_args_detects_nvenc():
-    linux._HW_CACHE = linux._HW_UNSET
-    with mock.patch.object(linux.subprocess, "run",
-                           return_value=types.SimpleNamespace(stdout="V... h264_nvenc NVIDIA\n", returncode=0)):
-        a = linux.hw_encode_args()
-    linux._HW_CACHE = linux._HW_UNSET
-    assert a and not a[0] and "h264_nvenc" in a[1] and "-pix_fmt yuv420p" in a[1]
+@pytest.fixture
+def fresh_linux_hw(monkeypatch):
+    """Reset the per-process encoder cache and any developer override."""
+    monkeypatch.delenv("VIZGUI_HW_ENCODER", raising=False)
+    monkeypatch.setattr(linux, "_HW_CACHE", linux._HW_UNSET)
+    monkeypatch.setattr(linux, "_render_nodes", lambda: [])
+    return monkeypatch
 
 
-def test_linux_hw_encode_args_none_without_nvenc():
-    linux._HW_CACHE = linux._HW_UNSET
-    with mock.patch.object(linux.subprocess, "run",
-                           return_value=types.SimpleNamespace(stdout="only libx264 here\n", returncode=0)):
-        a = linux.hw_encode_args()
-    linux._HW_CACHE = linux._HW_UNSET
-    assert a is None
+def _probe_result(working):
+    """Fake subprocess.run: a probe succeeds only if its encoder is in `working`."""
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        enc = cmd[cmd.index("-c:v") + 1]
+        node = cmd[cmd.index("-vaapi_device") + 1] if "-vaapi_device" in cmd else ""
+        ok = enc in working or f"{enc}@{node}" in working
+        return types.SimpleNamespace(returncode=0 if ok else 1, stdout="",
+                                     stderr="" if ok else "Cannot load libcuda.so.1\n")
+    return run, calls
+
+
+def test_linux_hw_encode_uses_nvenc_when_test_encode_works(fresh_linux_hw):
+    run, calls = _probe_result({"h264_nvenc"})
+    fresh_linux_hw.setattr(linux.subprocess, "run", run)
+    a = linux.hw_encode_args()
+    assert a[0] == "" and "h264_nvenc" in a[1] and "-pix_fmt yuv420p" in a[1]
+    assert a[2] == ""                          # no upload filter for NVENC
+    assert calls[0][-3:] == ["-f", "null", "-"]  # a real encode, not -encoders
+
+
+def test_linux_listed_but_unusable_nvenc_falls_to_vaapi(fresh_linux_hw):
+    # Distro ffmpeg builds list h264_nvenc everywhere; on AMD the probe fails.
+    run, calls = _probe_result({"h264_vaapi"})
+    fresh_linux_hw.setattr(linux.subprocess, "run", run)
+    fresh_linux_hw.setattr(linux, "_render_nodes", lambda: ["/dev/dri/renderD128"])
+    a = linux.hw_encode_args()
+    assert a == ("-vaapi_device /dev/dri/renderD128", linux._VAAPI_CODEC,
+                 "format=nv12,hwupload")
+    assert [c[c.index("-c:v") + 1] for c in calls] == ["h264_nvenc", "h264_vaapi"]
+    assert "format=nv12,hwupload" in calls[1]   # probe uses the real filter chain
+
+
+def test_linux_vaapi_tries_each_render_node(fresh_linux_hw):
+    run, calls = _probe_result({"h264_vaapi@/dev/dri/renderD129"})
+    fresh_linux_hw.setattr(linux.subprocess, "run", run)
+    fresh_linux_hw.setattr(linux, "_render_nodes",
+                           lambda: ["/dev/dri/renderD128", "/dev/dri/renderD129"])
+    assert linux.hw_encode_args()[0] == "-vaapi_device /dev/dri/renderD129"
+    assert len(calls) == 3
+
+
+def test_linux_no_working_hw_encoder_is_none_and_cached(fresh_linux_hw):
+    run, calls = _probe_result(set())
+    fresh_linux_hw.setattr(linux.subprocess, "run", run)
+    fresh_linux_hw.setattr(linux, "_render_nodes", lambda: ["/dev/dri/renderD128"])
+    assert linux.hw_encode_args() is None
+    assert linux.hw_encode_args() is None
+    assert len(calls) == 2                      # probed once per process
+
+
+def test_concurrent_callers_wait_for_same_hardware_probe(fresh_linux_hw):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
+    started = threading.Event()
+    release = threading.Event()
+    second_started = threading.Event()
+    run, calls = _probe_result({"h264_nvenc"})
+
+    def slow_probe(cmd, **kwargs):
+        started.set()
+        assert release.wait(5)
+        return run(cmd, **kwargs)
+
+    def second_call():
+        second_started.set()
+        return linux.hw_encode_args()
+
+    fresh_linux_hw.setattr(linux.subprocess, "run", slow_probe)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(linux.hw_encode_args)
+        assert started.wait(5)
+        second = pool.submit(second_call)
+        assert second_started.wait(5)
+        try:
+            # The probe must remain the sole source of either result.
+            with pytest.raises(TimeoutError):
+                second.result(timeout=0.2)
+        finally:
+            release.set()
+        assert first.result(timeout=5) == second.result(timeout=5) == linux._NVENC + ("",)
+    assert len(calls) == 1
+
+
+def test_linux_probe_timeout_or_missing_ffmpeg_is_a_failure(fresh_linux_hw):
+    for err in (linux.subprocess.TimeoutExpired("ffmpeg", 10), FileNotFoundError("ffmpeg")):
+        fresh_linux_hw.setattr(linux, "_HW_CACHE", linux._HW_UNSET)
+        fresh_linux_hw.setattr(linux.subprocess, "run", mock.Mock(side_effect=err))
+        assert linux.hw_encode_args() is None
+
+
+def test_linux_hw_encoder_env_none_skips_probing(fresh_linux_hw):
+    fresh_linux_hw.setenv("VIZGUI_HW_ENCODER", "none")
+    run = mock.Mock()
+    fresh_linux_hw.setattr(linux.subprocess, "run", run)
+    assert linux.hw_encode_args() is None
+    run.assert_not_called()
+
+
+def test_linux_hw_encoder_env_vaapi_skips_nvenc(fresh_linux_hw):
+    fresh_linux_hw.setenv("VIZGUI_HW_ENCODER", "VAAPI")
+    run, calls = _probe_result({"h264_nvenc", "h264_vaapi"})
+    fresh_linux_hw.setattr(linux.subprocess, "run", run)
+    fresh_linux_hw.setattr(linux, "_render_nodes", lambda: ["/dev/dri/renderD128"])
+    assert "h264_vaapi" in linux.hw_encode_args()[1]
+    assert len(calls) == 1
+
+
+def test_linux_probe_command_is_valid_for_real_ffmpeg():
+    """The probe must not reject every encoder because of a malformed command."""
+    import shutil
+    import subprocess
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg is not installed")
+    encoders = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
+                              capture_output=True, text=True).stdout
+    if "libx264" not in encoders:
+        pytest.skip("ffmpeg lacks libx264")
+    assert linux._encoder_works("", "-c:v libx264 -preset ultrafast", "format=nv12")
+    assert not linux._encoder_works("", "-c:v vizgui_no_such_encoder")
 
 
 def test_base_hw_encode_args_default_none():
     assert base.hw_encode_args() is None
+
+
+def test_linux_verifies_listening_socket_ownership(tmp_path):
+    proc = tmp_path / 'proc'
+    fd = proc / '123' / 'fd'
+    fd.mkdir(parents=True)
+    net = proc / 'net'
+    net.mkdir()
+    (fd / '7').symlink_to('socket:[98765]')
+    table = net / 'tcp6'
+    table.write_text('header\n 0: 00000000000000000000000000000000:3039 '
+                     '00000000000000000000000000000000:0000 0A '
+                     '00000000:00000000 00:00000000 00000000 1000 0 98765\n')
+    assert linux.process_listens_on_port(123, 12345, proc_root=str(proc))
+    assert not linux.process_listens_on_port(123, 12346, proc_root=str(proc))
+    assert not linux.process_listens_on_port(999, 12345, proc_root=str(proc))
+    table.write_text(table.read_text().replace(' 0A ', ' 01 '))
+    assert not linux.process_listens_on_port(123, 12345, proc_root=str(proc))
 
 
 def test_linux_launch_caster_runs_and_terminates():

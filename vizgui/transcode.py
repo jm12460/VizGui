@@ -7,8 +7,16 @@ import subprocess
 from . import platforms
 from .paths import WRAPPER, log
 
-# True if this platform/GPU offers a hardware H.264 encoder (for UI/logging).
-HAS_HW = platforms.hw_encode_args() is not None
+
+def encoder_name():
+    """Video encoder a live transcode will use, e.g. 'h264_vaapi' or 'cpu' (for
+    status/logging). Probed lazily on first use, not at import."""
+    hw = platforms.hw_encode_args()
+    if not hw:
+        return "cpu"
+    args = hw[1].split()
+    return args[args.index("-c:v") + 1] if "-c:v" in args[:-1] else "hw"
+
 
 _SUB_FILE = os.path.join(os.path.dirname(WRAPPER), "vizsub.ass")   # safe burn path
 
@@ -45,23 +53,32 @@ def prepare_subtitle(media_path, sub):
     return None
 
 
-def _mid_args(audio, sub):
-    """ffmpeg maps + burn filter for a chosen audio track and/or subtitle.
+def _mid_args(audio, sub, upload="", max_height=None):
+    """ffmpeg maps + video filters for a chosen audio track and/or subtitle.
+    ``upload`` (e.g. VAAPI's format=nv12,hwupload) must run last, after any
+    burn-in, so it ends whichever filter chain is used.
     [..] are quoted because bash would glob them."""
+    filters = []
+    if max_height == 1080:
+        filters.append("scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2")
+    if upload:
+        filters.append(upload)
+    tail = "," + ",".join(filters) if filters else ""
     if sub and sub.get("kind") == "image":
         si = int(sub["si"])
         a = int(audio) if audio is not None else 0
-        fc = shlex.quote(f"[0:v:0][0:s:{si}]overlay[vo]")
+        fc = shlex.quote(f"[0:v:0][0:s:{si}]overlay{tail}[vo]")
         return f" -filter_complex {fc} -map {shlex.quote('[vo]')} -map 0:a:{a}"
     if sub:                                   # text subtitle burned via -vf
-        vf = f" -vf subtitles={shlex.quote(sub['file'])}"
+        vf = f" -vf {shlex.quote('subtitles=' + sub['file'] + tail)}"
         return (f" -map 0:v:0 -map 0:a:{int(audio)}{vf}") if audio is not None else vf
+    vf = f" -vf {shlex.quote(','.join(filters))}" if filters else ""
     if audio is not None:
-        return f" -map 0:v:0 -map 0:a:{int(audio)}"
-    return ""
+        return f" -map 0:v:0 -map 0:a:{int(audio)}{vf}"
+    return vf
 
 
-def write_wrapper(path, copy_video=False, start=0, audio=None, sub=None):
+def write_wrapper(path, copy_video=False, start=0, audio=None, sub=None, max_height=None):
     """Write the helper go-chromecast runs for live streaming. The source path is
     embedded (shell-quoted, so spaces/+/() are safe) and the helper streams the
     video + stereo AAC as fragmented mp4 to stdout. Returns the script path
@@ -75,17 +92,22 @@ def write_wrapper(path, copy_video=False, start=0, audio=None, sub=None):
         copy_video = False          # burning a subtitle requires re-encoding the video
     q = shlex.quote(os.path.abspath(path))
     ss = f"-ss {int(start)} " if start else ""   # input seek, for resume
+    upload = ""
     if copy_video:
         vin, venc = f"{ss}-i {q}", "-c:v copy"
     else:
         hw = platforms.hw_encode_args()
         if hw:
-            vin, venc = f"{hw[0]} {ss}-i {q}", hw[1]
+            vin = f"{hw[0]} {ss}-i {q}" if hw[0] else f"{ss}-i {q}"
+            venc = hw[1]
+            upload = hw[2] if len(hw) > 2 else ""
         else:
+            # -pix_fmt yuv420p: libx264 otherwise keeps a 10-bit source's depth
+            # and emits High 10 H.264, which Cast receivers can't decode.
             vin = f"{ss}-i {q}"
-            venc = ("-c:v libx264 -preset veryfast -tune zerolatency -crf 23 "
-                    "-maxrate 10M -bufsize 20M -g 48 -bf 0")
-    mid = _mid_args(audio, sub)
+            venc = ("-c:v libx264 -pix_fmt yuv420p -preset veryfast -tune zerolatency "
+                    "-crf 23 -maxrate 10M -bufsize 20M -g 48 -bf 0")
+    mid = _mid_args(audio, sub, upload, max_height)
     text = ("#!/usr/bin/env bash\n"
             "exec ffmpeg " + vin + mid + " " + venc +
             " -c:a aac -ac 2 -b:a 192k"

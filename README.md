@@ -171,11 +171,13 @@ Settings live in `~/.config/vizgui/config.json` (chmod 600); logs in `~/.cache/v
 
 ## Tests
 ```
-pytest            # requires pytest (e.g. `sudo pacman -S python-pytest`)
+python -m pytest -q   # requires pytest (e.g. `sudo pacman -S python-pytest`)
 ```
 Tests in `tests/` use fake playback devices and temporary state, including
 offscreen Qt checks, isolated loopback HTTP integration tests, service generation,
-and direct/remux/transcode restart recovery. No real TV or live service is used.
+direct/remux/transcode restart recovery, receiver ownership, compatibility
+fallbacks, and mocked hardware encoder selection. Some checks use Node.js or
+FFmpeg when available. No real TV or live service is used.
 Coverage includes status & cast
 planning, Cast-device discovery, continue-watching + active-cast recovery, the
 media probe (audio/subtitle/chapter parsing), config, the playback targets &

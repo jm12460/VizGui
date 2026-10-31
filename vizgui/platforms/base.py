@@ -152,7 +152,14 @@ def launch_detached(args, log_path=None):
     return p
 
 
+def process_listens_on_port(pid, port):
+    """Return None where sender socket ownership cannot be verified safely."""
+    return None
+
+
 def hw_encode_args():
-    """``(input_prefix, video_codec_args)`` for a hardware H.264 encoder on this
-    platform (as ffmpeg arg strings), or None to fall back to software libx264."""
+    """``(input_prefix, video_codec_args[, upload_filter])`` for a hardware H.264
+    encoder on this platform (as ffmpeg arg strings), or None to fall back to
+    software libx264. ``upload_filter``, when present, is appended as the last
+    step of the video filter chain (e.g. VAAPI's ``format=nv12,hwupload``)."""
     return None

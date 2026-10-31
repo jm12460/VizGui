@@ -7,6 +7,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Remember a confirmed 1080p compatibility choice per Cast target and media
+  file, so later resumes and stream restarts skip the failed 4K attempt.
 - Compatible, bounded H.264/AAC-LC mono or stereo files are prepared as temporary seekable MP4s
   for direct Cast seeking; other media keeps the existing streaming path.
 - The phone remote offers explicit interrupted Cast playback recovery, with
@@ -36,6 +38,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   disconnect/reconnect behavior, and client shutdown safety.
 
 ### Fixed
+- Cancel a pending Cast launch as soon as Stop is requested, including while
+  media preparation or the receiver handoff is still in progress.
+- Reject receiver playback confirmation when it can be identified as a
+  different Cast sender; require a verified sender for 1080p fallback success.
+- Retry an unconfirmed 4K Cast transcode once at 1080p when the same receiver
+  stream remains buffering; unrelated, paused, and disconnected sessions are
+  not retried automatically.
+- Live transcodes no longer fail on AMD/Intel machines whose ffmpeg build lists
+  NVENC without an NVIDIA GPU. Hardware encoders are now verified with a short
+  test encode (NVENC, then VAAPI on each GPU render node) before use, falling
+  back to software x264; `VIZGUI_HW_ENCODER=nvenc|vaapi|none` forces a choice.
+- Software transcodes of 10-bit sources now output 8-bit H.264 instead of
+  High 10, which Cast receivers cannot decode.
 - After a Cast network outage, reopen the same still-buffering stream once at
   the receiver's reported position, while preserving paused and changed sessions.
 - Freeze the displayed position and show when the Cast receiver is unreachable
