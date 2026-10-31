@@ -48,7 +48,7 @@ def video_size(path):
 def vcodec(path):
     """Video codec of the first video stream (e.g. 'h264', 'hevc'), or ''."""
     try:
-        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+        r = subprocess.run([platforms.find_tool("ffprobe"), "-v", "error", "-select_streams", "v:0",
                             "-show_entries", "stream=codec_name",
                             "-of", "default=nw=1:nk=1", path],
                            capture_output=True, text=True, timeout=30)

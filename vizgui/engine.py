@@ -328,9 +328,9 @@ class Engine:
         self._changed()
 
     def select_sub(self, sub):
+        """Turn subtitles on/off by re-casting at the current position (keeps audio)."""
         if self._observer_blocked():
             return
-        """Turn subtitles on/off by re-casting at the current position (keeps audio)."""
         if not self._now_path:
             return
         cur = self._sub.get("i") if self._sub else None
@@ -341,20 +341,20 @@ class Engine:
         self.cast(self._now_path, pos, audio=self._audio, sub=sub)
 
     def select_audio(self, i):
+        """Switch audio track by re-casting the current file at its position."""
         if self._observer_blocked():
             return
-        """Switch audio track by re-casting the current file at its position."""
         if not self._now_path or i == self._audio:
             return
         pos = self._np_pos + (self._resume_base if self.now_live else 0)
         self.cast(self._now_path, pos, audio=i, sub=self._sub)
 
     def jump_to(self, secs):
+        """Jump to an absolute time (chapter). A live stream can't seek, so restart
+        it at the offset; direct cast and VLC seek in place."""
         if self._observer_blocked():
             return
         self._fallback_disallowed = True
-        """Jump to an absolute time (chapter). A live stream can't seek, so restart
-        it at the offset; direct cast and VLC seek in place."""
         secs = int(secs)
         if self.now_live and self._now_path:
             self.cast(self._now_path, secs, audio=self._audio, sub=self._sub)
@@ -415,9 +415,9 @@ class Engine:
         return self.active.stop()
 
     def transport(self, fn):
+        """Run a transport action off-thread, then poll to refresh state."""
         if self._observer_blocked():
             return
-        """Run a transport action off-thread, then poll to refresh state."""
         self._network_recovery = None
         self._fallback_disallowed = True
         if (fn == self.stop and self._playback_request
@@ -449,9 +449,9 @@ class Engine:
             self._status("TV didn't respond — is it on and on the same Wi-Fi?")
 
     def on_ended(self, allow_auto_next=True, finished=True):
+        """Current item finished. Auto-advance if the target needs us to, else clear."""
         if self._cast_observer():
             return
-        """Current item finished. Auto-advance if the target needs us to, else clear."""
         old_path = self._now_path
         unknown_duration_live_end = finished and self.now_live and self._np_dur <= 0
         if not unknown_duration_live_end:
@@ -795,9 +795,9 @@ class Engine:
         }
 
     def web_add_cast(self, dev):
+        """Add a Cast device discovered from the phone, then switch to it."""
         if self.playback_role == "observer":
             return
-        """Add a Cast device discovered from the phone, then switch to it."""
         addr = dev.get("addr")
         if not addr:
             return
