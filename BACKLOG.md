@@ -12,11 +12,11 @@ deferred if they are not worth pursuing.
   saved resume position was missing from a freshly opened desktop list, then
   appeared later. Reproduction and cause are not established. Next: capture
   whether the list changes while open, the current playback state, and timing.
-- **4K Cast showed a black screen** — Mitigated, cause not fully established.
-  A 4K HDR HEVC movie failed on a Vizio built-in Cast receiver; a 1080p H.264
-  fallback played. Direct 4K H.264 and HEVC samples also failed to show picture.
-  Next: investigate receiver codec/profile limits and HDR handling; avoid assuming
-  that every 4K TV has the same limits.
+- **Direct 4K Cast showed a black screen** — Partially mitigated. HDR tone mapping
+  now plays successfully on the tested Vizio 4K receiver, and its 1080p fallback
+  works. Direct 4K H.264 and HEVC samples previously failed to show picture.
+  Next: investigate receiver codec/profile limits for direct playback; do not
+  assume every 4K TV accepts the same formats.
 
 ## Friction / UX
 
@@ -24,8 +24,9 @@ deferred if they are not worth pursuing.
   through the confirmation timeout before retrying at 1080p. Later playback of
   the same unchanged file on the same target can use the remembered choice.
   Next: investigate safe capability detection and ways to shorten the first wait.
-- **Live transcode seeks reload** — Observed. A 30-second jump took about 8–9
-  seconds on the test TV. A temporary HLS prototype sought into a previously
+- **Live transcode seeks reload** — Observed. A 30-second jump took about five
+  seconds on the latest test and reloaded the video. A temporary HLS prototype
+  sought into a previously
   ungenerated section and felt faster; it is not a VizGui playback path. Next:
   test backward/repeated seeks, audio sync, subtitles, and interruption handling
   before considering integration.

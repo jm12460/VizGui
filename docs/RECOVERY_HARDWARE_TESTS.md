@@ -37,6 +37,12 @@ cleared the other prompt in a separate check. The 4K-to-1080p choice was tested
 again through Continue Watching and after a server restart. These observations
 do not establish results for different receivers, VAAPI, or every failure mode.
 
+Additional playback observations from November 1, 2026: the HDR tone-mapping
+build was tested on the same Vizio 4K TV. HDR playback worked, startup time was
+normal, and Continue Watching resumed as before. A +30-second jump reloaded the
+video and resumed after about five seconds. This confirms the tested HDR file
+and transcode path on this receiver, not all HDR formats or Cast devices.
+
 A separate temporary HLS prototype played on the same TV and sought into a
 previously ungenerated section; it is not integrated into VizGui. Continue the
 remaining checks with the actual application playback paths.
